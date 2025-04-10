@@ -50,7 +50,7 @@ def match_value(user_input, valid_values):
     best_match, score = result
     return best_match if score > 80 else user_input
 
-# Fonction pour compter le nombre d'occurrences de l'école de l'utilisateur dans un groupe
+# Fonction pour compter le nombre d'occurrences de l'école de l'utilisateur dans un groupe (sans normalisation)
 def count_school_students(group_schools, user_school):
     return sum(1 for school in group_schools if school == user_school)
 
@@ -60,7 +60,7 @@ def get_recommendations(student_name, user_level, user_subjects, user_teachers, 
     matched_level = match_value(user_level, levels)
     matched_subjects = [match_value(subj.strip(), subjects) for subj in user_subjects.split(",")]
     matched_teachers = [match_value(teacher.strip(), teachers) for teacher in user_teachers.split(",")] if user_teachers else [None] * len(matched_subjects)
-    matched_school = match_value(user_school, schools)
+    matched_school = match_value(user_school, schools)  # Pas de normalisation
     matched_center = match_value(user_center, centers) if user_center else None
     
     if len(matched_teachers) != len(matched_subjects):
@@ -86,13 +86,14 @@ def get_recommendations(student_name, user_level, user_subjects, user_teachers, 
         output.append("<b>Centre souhaité</b> : Non spécifié")
 
     all_recommendations = {}
+    all_groups_for_selection = {}  # Pour stocker les groupes sous forme de dictionnaires pour la sélection
     for matched_subject, matched_teacher in zip(matched_subjects, matched_teachers):
         # Récupérer tous les groupes correspondant au niveau et à la matière
         all_groups_data = collection.get(include=["metadatas", "documents"])
         groups = []
         for metadata, document in zip(all_groups_data['metadatas'], all_groups_data['documents']):
             if metadata['niveau'] == matched_level and metadata['matiere'] == matched_subject:
-                group_schools = [school for school in metadata['ecole'].split(", ")]
+                group_schools = [school for school in metadata['ecole'].split(", ")]  # Pas de normalisation
                 groups.append({
                     "id_cours": metadata['id_cours'],
                     "name_cours": metadata['name_cours'],
@@ -145,7 +146,7 @@ def get_recommendations(student_name, user_level, user_subjects, user_teachers, 
                         count = count_school_students(g['schools'], matched_school)
                     add_groups(priority_1_groups[:3])
                 else:
-                    add_groups(priority_1_groups)  # Garder sans tri pour l'instant
+                    add_groups(priority_1_groups)
 
             # Priorité 2 : Même professeur, même centre (ignorer l'école)
             if matched_teacher and len(selected_groups) < 3:
@@ -181,7 +182,6 @@ def get_recommendations(student_name, user_level, user_subjects, user_teachers, 
                 random.shuffle(remaining_groups)
                 add_groups(remaining_groups)
 
-        # Si le centre n'est pas spécifié, utiliser la logique existante
         else:
             # Étape 1 : Vérifier l'existence du même professeur
             teacher_groups = []
@@ -191,25 +191,19 @@ def get_recommendations(student_name, user_level, user_subjects, user_teachers, 
             # Étape 2 : Si on a 3 groupes ou plus avec le même professeur
             if len(teacher_groups) >= 3:
                 teacher_groups.sort(key=lambda x: count_school_students(x['schools'], matched_school), reverse=True)
-                add_groups(teacher_groups[:3])  # Prendre les 3 premiers après tri
+                add_groups(teacher_groups[:3])
 
-            # Étape 3 : Si on a moins de 3 groupes avec le même professeur
             else:
-                # Vérifier si au moins un groupe contient l'école de l'utilisateur
                 has_school = any(matched_school in g['schools'] for g in teacher_groups)
                 if has_school:
-                    # Trier par nombre d'occurrences de l'école
                     teacher_groups.sort(key=lambda x: count_school_students(x['schools'], matched_school), reverse=True)
-                # Sinon, laisser les groupes dans leur ordre initial (pas de tri)
-                add_groups(teacher_groups)  # Ajouter les groupes trouvés
+                add_groups(teacher_groups)
 
-                # Chercher les groupes restants ayant la même école (ignorer le professeur)
                 if len(selected_groups) < 3:
                     school_groups = [g for g in groups if matched_school in g['schools'] and g['id_cours'] not in selected_ids]
                     school_groups.sort(key=lambda x: count_school_students(x['schools'], matched_school), reverse=True)
                     add_groups(school_groups)
 
-                # Compléter avec des groupes aléatoires si nécessaire
                 if len(selected_groups) < 3:
                     remaining_groups = [g for g in groups if g['id_cours'] not in selected_ids]
                     random.shuffle(remaining_groups)
@@ -218,8 +212,10 @@ def get_recommendations(student_name, user_level, user_subjects, user_teachers, 
         if len(selected_groups) < 3:
             output.append(f"Attention : Seulement {len(selected_groups)} groupe(s) trouvé(s) pour {matched_subject}.")
 
-        # Préparer les recommandations
+        # Préparer les recommandations (format HTML pour l'affichage)
         recommendations = []
+        # Préparer les groupes pour la sélection (format simple)
+        groups_for_selection = []
         for i, group in enumerate(selected_groups[:3], 1):
             recommendation = (
                 f"<h4>Groupe {i} ({matched_subject})</h4>"
@@ -236,11 +232,18 @@ def get_recommendations(student_name, user_level, user_subjects, user_teachers, 
                 f"<b>Écoles:</b><br>{group['description']}"
             )
             recommendations.append(recommendation)
+            # Ajouter le groupe pour la sélection
+            groups_for_selection.append({
+                "id_cours": group['id_cours'],
+                "name_cours": group['name_cours'],
+                "display": f"Groupe {i} : {group['id_cours']} - {group['name_cours']}"
+            })
         
         all_recommendations[matched_subject] = recommendations
+        all_groups_for_selection[matched_subject] = groups_for_selection
 
     output.append(f"<b>Les groupes recommandés pour l'étudiant</b> {student_name} :")
-    return output, all_recommendations
+    return output, all_recommendations, all_groups_for_selection, matched_subjects
 
 # Styles CSS pour l'affichage
 st.markdown("""
@@ -294,6 +297,11 @@ if 'step' not in st.session_state:
     st.session_state.current_input = ""
     st.session_state.submitted = False
     st.session_state.input_counter = 0
+    st.session_state.all_recommendations = {}
+    st.session_state.all_groups_for_selection = {}
+    st.session_state.matched_subjects = []
+    st.session_state.selected_groups = {}
+    st.session_state.current_subject_index = 0
 
 # Afficher les messages précédents
 st.markdown("<div class='container'>", unsafe_allow_html=True)
@@ -320,7 +328,7 @@ placeholders = [
     "Ex: Centre A (ou laissez vide)"
 ]
 
-# Fonction pour gérer la soumission par Entrée
+# Fonction pour gérer la soumission par Entrée (étapes 1 à 6)
 def handle_input_submission(step, response):
     if step == 1:  # Nom de l'étudiant (obligatoire)
         if response.strip():
@@ -364,7 +372,7 @@ def handle_input_submission(step, response):
         st.session_state.messages.append((f"<div class='user-message'>{response if response.strip() else 'Aucun spécifié'}</div>", False))
         st.session_state.messages.append(("<div class='bot-message'>Merci ! Je recherche les groupes recommandés...</div>", True))
         with st.spinner("Recherche en cours..."):
-            output, all_recommendations = get_recommendations(
+            output, all_recommendations, all_groups_for_selection, matched_subjects = get_recommendations(
                 st.session_state.responses['student_name'],
                 st.session_state.responses['user_level'],
                 st.session_state.responses['user_subjects'],
@@ -381,10 +389,122 @@ def handle_input_submission(step, response):
                     st.session_state.messages.append((f"<div class='bot-message'>{rec}</div>", True))
         else:
             st.session_state.messages.append(("<div class='bot-message'>Désolé, aucune recommandation disponible.</div>", True))
-        st.session_state.messages.append(("<div class='bot-message'>Voulez-vous traiter un autre cas ? (Oui/Non)</div>", True))
-        st.session_state.step = 7
+            st.session_state.step = 9  # Passer directement à l'étape finale
+            st.rerun()
+            return
+        # Stocker les données pour la sélection
+        st.session_state.all_recommendations = all_recommendations
+        st.session_state.all_groups_for_selection = all_groups_for_selection
+        st.session_state.matched_subjects = matched_subjects
+        st.session_state.current_subject_index = 0
+        # Vérifier s'il y a des groupes à sélectionner
+        if not any(st.session_state.all_groups_for_selection.values()):
+            st.session_state.messages.append(("<div class='bot-message'>Aucun groupe disponible pour sélection.</div>", True))
+            st.session_state.messages.append(("<div class='bot-message'>Voulez-vous traiter un autre cas ?<b> (Oui/Non) </b></div>", True))
+            st.session_state.step = 9
+            st.rerun()
+            return
+        # Passer à l'étape de sélection des groupes
+        current_subject = st.session_state.matched_subjects[st.session_state.current_subject_index]
+        groups = st.session_state.all_groups_for_selection.get(current_subject, [])
+        if not groups:
+            # Si aucune recommandation pour cette matière, passer à la suivante
+            st.session_state.current_subject_index += 1
+            if st.session_state.current_subject_index < len(st.session_state.matched_subjects):
+                current_subject = st.session_state.matched_subjects[st.session_state.current_subject_index]
+                groups = st.session_state.all_groups_for_selection.get(current_subject, [])
+                if not groups:
+                    st.session_state.messages.append(("<div class='bot-message'>Aucun groupe disponible pour sélection. Voulez-vous traiter un autre cas ? (Oui/Non)</div>", True))
+                    st.session_state.step = 9
+                    st.rerun()
+                    return
+            else:
+                st.session_state.messages.append(("<div class='bot-message'>Aucun groupe disponible pour sélection. Voulez-vous traiter un autre cas ? (Oui/Non)</div>", True))
+                st.session_state.step = 9
+                st.rerun()
+                return
+        # Afficher les groupes pour la matière actuelle
+        groups_message = f"<div class='bot-message'>Voici les groupes recommandés pour {current_subject} :<br>"
+        for i, group in enumerate(groups, 1):
+            groups_message += f"{group['display']}<br>"
+        groups_message += f"Veuillez entrer le numéro du groupe que vous souhaitez choisir (par exemple, 1 pour {groups[0]['display']}) :</div>"
+        st.session_state.messages.append((groups_message, True))
+        st.session_state.step = 8
 
-# Logique conversationnelle sans st.form
+# Fonction pour gérer la sélection des groupes (étape 8)
+def handle_group_selection(response):
+    current_subject = st.session_state.matched_subjects[st.session_state.current_subject_index]
+    groups = st.session_state.all_groups_for_selection.get(current_subject, [])
+    
+    # Vérifier si la réponse est un numéro valide
+    try:
+        group_number = int(response.strip())
+        if 1 <= group_number <= len(groups):
+            selected_group = groups[group_number - 1]
+            st.session_state.selected_groups[current_subject] = selected_group
+            st.session_state.messages.append((f"<div class='user-message'>{response}</div>", False))
+            st.session_state.messages.append((f"<div class='bot-message'>Vous avez choisi {selected_group['display']} pour {current_subject}.</div>", True))
+            # Passer à la matière suivante
+            st.session_state.current_subject_index += 1
+            if st.session_state.current_subject_index < len(st.session_state.matched_subjects):
+                # Demander pour la matière suivante
+                current_subject = st.session_state.matched_subjects[st.session_state.current_subject_index]
+                groups = st.session_state.all_groups_for_selection.get(current_subject, [])
+                if not groups:
+                    # Si aucune recommandation pour cette matière, passer à la suivante
+                    st.session_state.current_subject_index += 1
+                    if st.session_state.current_subject_index < len(st.session_state.matched_subjects):
+                        current_subject = st.session_state.matched_subjects[st.session_state.current_subject_index]
+                        groups = st.session_state.all_groups_for_selection.get(current_subject, [])
+                        if not groups:
+                            # Afficher le récapitulatif si plus de matières
+                            recap_message = "<div class='bot-message'><b>Récapitulatif de vos choix :</b><br>"
+                            for subject, group in st.session_state.selected_groups.items():
+                                recap_message += f"- {subject} : {group['display']}<br>"
+                            st.session_state.messages.append((recap_message, True))
+                            st.session_state.messages.append(("<div class='bot-message'>Voulez-vous traiter un autre cas ?<b> (Oui/Non) </b></div>", True))
+                            st.session_state.step = 9
+                            st.rerun()
+                            return
+                    else:
+                        # Afficher le récapitulatif si plus de matières
+                        recap_message = "<div class='bot-message'><b>Récapitulatif de vos choix :</b><br>"
+                        for subject, group in st.session_state.selected_groups.items():
+                            recap_message += f"- {subject} : {group['display']}<br>"
+                        st.session_state.messages.append((recap_message, True))
+                        st.session_state.messages.append(("<div class='bot-message'>Voulez-vous traiter un autre cas ?<b> (Oui/Non) </b></div>", True))
+                        st.session_state.step = 9
+                        st.rerun()
+                        return
+                groups_message = f"<div class='bot-message'>Voici les groupes recommandés pour {current_subject} :<br>"
+                for i, group in enumerate(groups, 1):
+                    groups_message += f"{group['display']}<br>"
+                groups_message += f"Veuillez entrer le numéro du groupe que vous souhaitez choisir (par exemple, 1 pour {groups[0]['display']}) :</div>"
+                st.session_state.messages.append((groups_message, True))
+            else:
+                # Afficher le récapitulatif
+                recap_message = "<div class='bot-message'><b>Récapitulatif de vos choix :</b><br>"
+                for subject, group in st.session_state.selected_groups.items():
+                    recap_message += f"- {subject} : {group['display']}<br>"
+                st.session_state.messages.append((recap_message, True))
+                st.session_state.messages.append(("<div class='bot-message'>Voulez-vous traiter un autre cas ?<b> (Oui/Non) </b></div>", True))
+                st.session_state.step = 9
+        else:
+            st.session_state.messages.append(("<div class='bot-message'>Veuillez entrer un numéro valide (entre 1 et " + str(len(groups)) + ").</div>", True))
+            groups_message = f"<div class='bot-message'>Voici les groupes recommandés pour {current_subject} :<br>"
+            for i, group in enumerate(groups, 1):
+                groups_message += f"{group['display']}<br>"
+            groups_message += f"Veuillez entrer le numéro du groupe que vous souhaitez choisir (par exemple, 1 pour {groups[0]['display']}) :</div>"
+            st.session_state.messages.append((groups_message, True))
+    except ValueError:
+        st.session_state.messages.append(("<div class='bot-message'>Veuillez entrer un numéro valide (par exemple, 1).</div>", True))
+        groups_message = f"<div class='bot-message'>Voici les groupes recommandés pour {current_subject} :<br>"
+        for i, group in enumerate(groups, 1):
+            groups_message += f"{group['display']}<br>"
+        groups_message += f"Veuillez entrer le numéro du groupe que vous souhaitez choisir (par exemple, 1 pour {groups[0]['display']}) :</div>"
+        st.session_state.messages.append((groups_message, True))
+
+# Logique conversationnelle
 if st.session_state.step == 0:
     st.session_state.messages = [("<div class='bot-message'>Quel est le nom de l'étudiant ?</div>", True)]
     st.session_state.step = 1
@@ -392,6 +512,11 @@ if st.session_state.step == 0:
     st.session_state.submitted = False
     st.session_state.input_counter = 0
     st.session_state.responses = {}
+    st.session_state.all_recommendations = {}
+    st.session_state.all_groups_for_selection = {}
+    st.session_state.matched_subjects = []
+    st.session_state.selected_groups = {}
+    st.session_state.current_subject_index = 0
     st.rerun()
 
 elif st.session_state.step in [1, 2, 3, 4, 5, 6]:
@@ -423,17 +548,69 @@ elif st.session_state.step in [1, 2, 3, 4, 5, 6]:
             st.session_state.submitted = False
             st.rerun()
 
-elif st.session_state.step == 7:
-    choice = st.radio("", ["Oui", "Non"], index=None, key="restart_choice")
-    if choice == "Oui":
-        # Réinitialiser tous les attributs nécessaires
-        st.session_state.clear()
-        st.session_state.step = 0
-        st.session_state.messages = [("<div class='bot-message'>Bonjour ! Je vais vous aider à trouver des groupes recommandés.</div>", True)]
-        st.session_state.responses = {}
-        st.session_state.current_input = ""
-        st.session_state.submitted = False
-        st.session_state.input_counter = 0
-        st.rerun()
-    elif choice == "Non":
-        st.session_state.step = 8
+elif st.session_state.step == 8:  # Étape de sélection des groupes
+    input_key = f"input_step_8_{st.session_state.current_subject_index}_{st.session_state.input_counter}"
+    response = st.text_input("Votre réponse :", key=input_key, placeholder="Entrez le numéro du groupe (ex: 1)")
+    
+    if input_key in st.session_state:
+        if st.session_state[input_key] != st.session_state.current_input:
+            st.session_state.current_input = st.session_state[input_key]
+            st.session_state.submitted = True
+
+    if st.session_state.submitted:
+        if st.session_state[input_key].strip():
+            handle_group_selection(st.session_state[input_key])
+            st.session_state.input_counter += 1
+            st.session_state.current_input = ""
+            st.session_state.submitted = False
+            st.rerun()
+        else:
+            st.session_state.messages.append(("<div class='bot-message'>Veuillez entrer un numéro valide (par exemple, 1).</div>", True))
+            current_subject = st.session_state.matched_subjects[st.session_state.current_subject_index]
+            groups = st.session_state.all_groups_for_selection.get(current_subject, [])
+            groups_message = f"<div class='bot-message'>Voici les groupes recommandés pour {current_subject} :<br>"
+            for i, group in enumerate(groups, 1):
+                groups_message += f"{group['display']}<br>"
+            groups_message += f"Veuillez entrer le numéro du groupe que vous souhaitez choisir (par exemple, 1 pour {groups[0]['display']}) :</div>"
+            st.session_state.messages.append((groups_message, True))
+            st.session_state.input_counter += 1
+            st.session_state.submitted = False
+            st.rerun()
+
+elif st.session_state.step == 9:  # Étape finale : recommencer ou terminer
+    input_key = f"input_step_9_{st.session_state.input_counter}"
+    response = st.text_input("Votre réponse :", key=input_key, placeholder="Oui ou Non")
+    
+    if input_key in st.session_state:
+        if st.session_state[input_key] != st.session_state.current_input:
+            st.session_state.current_input = st.session_state[input_key]
+            st.session_state.submitted = True
+
+    if st.session_state.submitted:
+        choice = st.session_state[input_key].strip().lower()
+        if choice in ["oui", "yes"]:
+            # Réinitialiser tous les attributs nécessaires
+            st.session_state.clear()
+            st.session_state.step = 0
+            st.session_state.messages = [("<div class='bot-message'>Bonjour ! Je vais vous aider à trouver des groupes recommandés.</div>", True)]
+            st.session_state.responses = {}
+            st.session_state.current_input = ""
+            st.session_state.submitted = False
+            st.session_state.input_counter = 0
+            st.session_state.all_recommendations = {}
+            st.session_state.all_groups_for_selection = {}
+            st.session_state.matched_subjects = []
+            st.session_state.selected_groups = {}
+            st.session_state.current_subject_index = 0
+            st.rerun()
+        elif choice in ["non", "no"]:
+            st.session_state.step = 10
+            st.session_state.messages.append(("<div class='bot-message'>Merci d'avoir utilisé le chatbot ! Au revoir.</div>", True))
+            st.session_state.input_counter += 1
+            st.session_state.submitted = False
+            st.rerun()
+        else:
+            st.session_state.messages.append(("<div class='bot-message'>Veuillez répondre par 'Oui' ou 'Non'.</div>", True))
+            st.session_state.input_counter += 1
+            st.session_state.submitted = False
+            st.rerun()
