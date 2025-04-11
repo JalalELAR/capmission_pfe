@@ -4,13 +4,14 @@ anyio==4.9.0
 asgiref==3.8.1
 attrs==25.3.0
 backoff==2.2.1
-bcrypt==4.3.0
+bcrypt==4.3.0 # Corrected: Removed wheel-specific part
 blinker==1.9.0
 build==1.2.2.post1
 cachetools==5.5.2
 certifi==2025.1.31
 charset-normalizer==3.4.1
 chroma-hnswlib==0.7.6
+pysqlite3-binary==0.5.3 # Added: Fix for ChromaDB SQLite version requirement
 chromadb==0.6.3
 click==8.1.8
 colorama==0.4.6
@@ -45,7 +46,7 @@ joblib==1.4.2
 jsonschema==4.23.0
 jsonschema-specifications==2024.10.1
 kubernetes==32.0.1
-Levenshtein==0.27.1
+# Levenshtein==0.27.1 # Removed: Redundant with python-Levenshtein
 markdown-it-py==3.0.0
 MarkupSafe==3.0.2
 mdurl==0.1.2
@@ -87,7 +88,7 @@ pyproject_hooks==1.2.0
 pyreadline3==3.5.4
 python-dateutil==2.9.0.post0
 python-dotenv==1.0.1
-python-Levenshtein==0.27.1
+python-Levenshtein==0.27.1 # Keep this one
 pytz==2025.1
 PyYAML==6.0.2
 RapidFuzz==3.12.2
