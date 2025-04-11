@@ -70,7 +70,6 @@ AND cf.deleted = FALSE
 AND co.deleted = FALSE 
 AND cftd.deleted = FALSE 
 AND co.tarifunitaire != 0
-AND cf.id IN (12678012, 12677992)
 GROUP BY cc.id, tea.id, cn.id, cm.id, st.id, ce.id, cc2.id, ct.id, cf.id, co.id, cftd.id
 ORDER BY cc.datecreation DESC;
 """
@@ -102,7 +101,7 @@ duree_tarifs_per_group = df.groupby('id_cours').apply(
 
 # Initialiser ChromaDB
 client = chromadb.PersistentClient(path="./chroma_db5")
-collection_name = "groupes_vectorises7"
+collection_name = "groupes_vectorises8"
 try:
     client.delete_collection(collection_name)
 except:
