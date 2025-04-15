@@ -436,7 +436,7 @@ st.title("Chatbot de Recommandation de Groupes")
 profile_path = os.path.join(parent_dir, "images", "profile1.png")
 
 with st.sidebar:
-    st.image("profile_path", width=280, use_container_width=False, output_format="auto")
+    st.image(profile_path, width=280, use_container_width=False, output_format="auto")
     # Nom sous la photo
     st.markdown("<div class='profile-name'>ELARACHE Jalal</div>", unsafe_allow_html=True)
     st.header("Options")
