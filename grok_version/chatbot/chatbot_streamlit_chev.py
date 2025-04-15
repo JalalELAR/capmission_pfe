@@ -11,8 +11,9 @@ import os
 
 # Get the directory where the current script is located
 current_dir = os.path.dirname(os.path.abspath(__file__))
+parent_dir = os.path.dirname(current_dir)
 # Build path to chroma_db relative to the current file
-chroma_path = os.path.join(current_dir, "..", "chroma_db5")
+chroma_path = os.path.join(parent_dir, "chroma_db5")
 # Initialize ChromaDB
 client = chromadb.PersistentClient(path=chroma_path)
 collection_groupes = client.get_collection(name="groupes_vectorises8")
@@ -425,14 +426,15 @@ st.markdown("""
 
 # Interface Streamlit
 # Ajouter le logo en haut
-logo_path = os.path.join(current_dir, "images", "logo.png")
+logo_path = os.path.join(parent_dir, "images", "logo.png")
 try:
     st.image(logo_path)  # Ajustez le chemin et la largeur selon vos besoins
 except FileNotFoundError:
     st.warning("Logo non trouvé. Veuillez placer 'logo.png' dans le répertoire du script.")
 st.title("Chatbot de Recommandation de Groupes")
 # Ajouter une barre latérale
-profile_path = os.path.join(current_dir, "images", "profile1.png")
+profile_path = os.path.join(parent_dir, "images", "profile1.png")
+
 with st.sidebar:
     st.image("profile_path", width=280, use_container_width=False, output_format="auto")
     # Nom sous la photo
