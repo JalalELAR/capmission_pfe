@@ -425,14 +425,16 @@ st.markdown("""
 
 # Interface Streamlit
 # Ajouter le logo en haut
+logo_path = os.path.join(current_dir, "images", "logo.png")
 try:
-    st.image("../images/logo.png")  # Ajustez le chemin et la largeur selon vos besoins
+    st.image(logo_path)  # Ajustez le chemin et la largeur selon vos besoins
 except FileNotFoundError:
     st.warning("Logo non trouvé. Veuillez placer 'logo.png' dans le répertoire du script.")
 st.title("Chatbot de Recommandation de Groupes")
 # Ajouter une barre latérale
+profile_path = os.path.join(current_dir, "images", "profile1.png")
 with st.sidebar:
-    st.image("../images/profile1.png", width=280, use_container_width=False, output_format="auto")
+    st.image("profile_path", width=280, use_container_width=False, output_format="auto")
     # Nom sous la photo
     st.markdown("<div class='profile-name'>ELARACHE Jalal</div>", unsafe_allow_html=True)
     st.header("Options")
