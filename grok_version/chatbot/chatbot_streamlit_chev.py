@@ -7,9 +7,14 @@ from fuzzywuzzy import process
 import random
 import chromadb
 from datetime import datetime, timedelta
+import os 
 
-# Initialiser ChromaDB
-client = chromadb.PersistentClient(path="../chroma_db5")
+# Get the directory where the current script is located
+current_dir = os.path.dirname(os.path.abspath(__file__))
+# Build path to chroma_db relative to the current file
+chroma_path = os.path.join(current_dir, "..", "chroma_db5")
+# Initialize ChromaDB
+client = chromadb.PersistentClient(path=chroma_path)
 collection_groupes = client.get_collection(name="groupes_vectorises8")
 collection_seances = client.get_or_create_collection(name="seances_vectorises")
 collection_combinaisons = client.get_or_create_collection(name="combinaisons_vectorises")
