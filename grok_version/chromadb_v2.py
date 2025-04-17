@@ -38,6 +38,7 @@ SELECT
     ce."name" AS ecole,
     (SELECT COUNT(*) FROM mtm_cours_student mcs WHERE mcs.id_seance = cc.id) AS nb_students,
     cf.id AS "id_forfait", 
+    cf."name" "nom_forfait" ,
     cftd.name AS "type_duree",
     cftd.id AS "type_duree_id", 
     co.tarifunitaire 
@@ -101,7 +102,8 @@ duree_tarifs_per_group = df.groupby('id_cours').apply(
 
 # Initialiser ChromaDB
 client = chromadb.PersistentClient(path="./chroma_db5")
-collection_name = "groupes_vectorises8"
+# groupes_vectorises8 sans le nom_forfait , groupes_vectorises9 avce nom_forfait
+collection_name = "groupes_vectorises9"
 try:
     client.delete_collection(collection_name)
 except:
@@ -116,7 +118,6 @@ documents = []
 metadatas = []
 ids = []
 
-# Regrouper par id_cours
 for id_cours, group in df.groupby('id_cours'):
     # Vérifier que le groupe est associé à un seul centre
     unique_centres = group['centre'].unique()
@@ -143,17 +144,39 @@ for id_cours, group in df.groupby('id_cours'):
     # Nombre total d'étudiants (via nb_students)
     total_students = group['nb_students'].iloc[0]
     
-    # Types de durée, id_forfait et tarifs
-    duree_tarifs = duree_tarifs_per_group.get(id_cours, "")
-    
-    # Récupérer l'id_forfait (unique par id_cours après groupement)
+    # Forfait
     id_forfait = str(group['id_forfait'].iloc[0])
+    nom_forfait = str(group['nom_forfait'].iloc[0]).encode('utf-8').decode('utf-8')
+    
+    # Types de durée à partir de duree_tarifs_per_group
+    duree_tarifs = duree_tarifs_per_group.get(id_cours, "")
+    type_duree = None
+    type_duree_id = None
+    tarif_unitaire = None
+    if duree_tarifs:
+        # Prendre la première entrée de duree_tarifs pour les champs individuels
+        first_entry = duree_tarifs.split(';')[0]
+        try:
+            parts = first_entry.split(':')
+            if len(parts) == 3:
+                type_duree = parts[0]
+                type_duree_id = f"{id_forfait}_1"  # Générer un ID temporaire
+                tarif_unitaire = parts[2]
+            else:
+                print(f"Format invalide dans duree_tarifs pour id_cours={id_cours}: {first_entry}")
+        except Exception as e:
+            print(f"Erreur de traitement de duree_tarifs pour id_cours={id_cours}: {first_entry}, erreur={e}")
+    
+    # Vérifier les données
+    if not type_duree or not type_duree_id:
+        print(f"Attention : type_duree ou type_duree_id manquant pour id_cours={id_cours}, id_forfait={id_forfait}")
     
     # Métadonnées
     metadata = {
         "id_cours": str(id_cours),
         "name_cours": str(group['name_cours'].iloc[0]).encode('utf-8').decode('utf-8'),
-        "id_forfait": id_forfait,  # Ajout de l'id_forfait
+        "id_forfait": id_forfait,
+        "nom_forfait": nom_forfait,
         "num_students": str(num_students),
         "total_students": str(total_students),
         "student": students.encode('utf-8').decode('utf-8'),
@@ -167,7 +190,10 @@ for id_cours, group in df.groupby('id_cours'):
         "jour": str(group['jour'].iloc[0]),
         "niveau": str(group['niveau'].iloc[0]).encode('utf-8').decode('utf-8'),
         "matiere": str(group['matiere'].iloc[0]).encode('utf-8').decode('utf-8'),
-        "duree_tarifs": duree_tarifs  # Ex. "BL 2bac Période 2:12677992:270.0"
+        "type_duree": type_duree or "Inconnu",
+        "type_duree_id": type_duree_id or "0",
+        "tarifunitaire": tarif_unitaire or "0.0",
+        "duree_tarifs": duree_tarifs
     }
     
     # Ajouter à ChromaDB
