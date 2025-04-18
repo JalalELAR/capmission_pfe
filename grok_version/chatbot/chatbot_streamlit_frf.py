@@ -4,7 +4,7 @@ from fuzzywuzzy import process
 import random
 import chromadb
 from datetime import datetime, timedelta
-import os 
+import os
 
 # Get the directory where the current script is located
 current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -13,11 +13,10 @@ parent_dir = os.path.dirname(current_dir)
 chroma_path = os.path.join(parent_dir, "chroma_db5")
 # Initialize ChromaDB
 client = chromadb.PersistentClient(path=chroma_path)
-collection_groupes = client.get_collection(name="groupes_vectorises8")
+collection_groupes = client.get_collection(name="groupes_vectorises9")
 collection_seances = client.get_or_create_collection(name="seances_vectorises")
 collection_combinaisons = client.get_or_create_collection(name="combinaisons_vectorises")
 collection_students = client.get_or_create_collection(name="students_vectorises")
-
 # Vérifier si les collections sont vides
 if collection_groupes.count() == 0:
     st.error("Erreur : La collection ChromaDB des groupes est vide. Veuillez exécuter la vectorisation d'abord.")
@@ -54,22 +53,69 @@ subjects_list = sorted(list(subjects))
 centers_list = sorted(list(centers))
 teachers_list = sorted(list(teachers))
 
-# Fonction pour extraire les types de durée valides depuis duree_tarifs
-def get_valid_duree_types():
-    duree_types = set()
+# Fonction pour extraire les forfaits et types de durée disponibles
+def get_available_forfaits(level, subject):
+    forfaits = {}
     all_groups = collection_groupes.get(include=["metadatas"])
+    # Normaliser la matière pour la recherche
+    target_subject = subject.strip().lower()
+    # Liste des matières disponibles pour la correspondance approximative
+    available_subjects = list(set(metadata['matiere'].strip().lower() for metadata in all_groups['metadatas'] if metadata.get('matiere')))
+    
+    # Recherche approximative si la correspondance exacte échoue
+    matched_subject = target_subject
+    if available_subjects:
+        best_match, score = process.extractOne(target_subject, available_subjects)
+        if score > 80:
+            matched_subject = best_match
+            print(f"Correspondance approximative : '{subject}' -> '{best_match}' (score: {score})")
+    
     for metadata in all_groups['metadatas']:
-        if 'duree_tarifs' in metadata:
-            duree_tarifs = metadata['duree_tarifs'].split(';')
-            for dt in duree_tarifs:
-                if dt.strip():
-                    parts = dt.split(':')
-                    if len(parts) == 3:
-                        name = parts[0]
-                        duree_types.add(name)
-    return sorted(list(duree_types))
-
-duree_types_list = get_valid_duree_types()
+        metadata_niveau = metadata.get('niveau', '').strip().lower()
+        metadata_matiere = metadata.get('matiere', '').strip().lower()
+        if (metadata_niveau == level.strip().lower() and
+            metadata_matiere == matched_subject):
+            id_forfait = metadata.get('id_forfait')
+            nom_forfait = metadata.get('nom_forfait', 'Forfait inconnu')
+            duree_tarifs = metadata.get('duree_tarifs', '')
+            print(f"Groupe correspondant trouvé : id_cours={metadata['id_cours']}, "
+                  f"matière={metadata['matiere']}, id_forfait={id_forfait}, "
+                  f"nom_forfait={nom_forfait}, duree_tarifs={duree_tarifs}")
+            # Inclure le forfait si id_forfait existe
+            if id_forfait:
+                if id_forfait not in forfaits:
+                    forfaits[id_forfait] = {
+                        'name': nom_forfait,
+                        'types_duree': {}
+                    }
+                # Parser duree_tarifs
+                if duree_tarifs:
+                    try:
+                        # Séparer les entrées de duree_tarifs
+                        duree_entries = duree_tarifs.split(';')
+                        for i, entry in enumerate(duree_entries, 1):
+                            if entry:
+                                parts = entry.split(':')
+                                if len(parts) == 3:
+                                    type_duree, entry_id_forfait, tarif = parts
+                                    if entry_id_forfait == id_forfait:
+                                        # Générer un type_duree_id temporaire basé sur l'index
+                                        type_duree_id = f"{id_forfait}_{i}"
+                                        forfaits[id_forfait]['types_duree'][type_duree_id] = {
+                                            'name': type_duree,
+                                            'tarif_unitaire': float(tarif)
+                                        }
+                                else:
+                                    print(f"Format invalide dans duree_tarifs pour id_cours={metadata['id_cours']}: {entry}")
+                    except (ValueError, TypeError) as e:
+                        print(f"Erreur de traitement de duree_tarifs pour id_cours={metadata['id_cours']}: {duree_tarifs}, erreur={e}")
+                else:
+                    print(f"Aucun duree_tarifs trouvé pour id_cours={metadata['id_cours']}, id_forfait={id_forfait}")
+    if not forfaits:
+        print(f"Aucun forfait trouvé pour niveau='{level}', matière='{subject}' (matched_subject='{matched_subject}')")
+    elif not any(forfait['types_duree'] for forfait in forfaits.values()):
+        print(f"Forfaits trouvés pour '{subject}', mais aucun type de durée disponible : {forfaits.keys()}")
+    return forfaits
 
 # Fonctions utilitaires
 def match_value(user_input, valid_values):
@@ -118,7 +164,7 @@ def get_remaining_sessions(id_cours):
                     if datetime.strptime(metadata['date_seance'], "%Y/%m/%d") > reference_date_fixed)
     return remaining
 
-def calculate_tariffs(selected_groups, user_duree_type):
+def calculate_tariffs(selected_groups, user_duree_types, user_type_duree_ids, forfaits_info):
     tariffs_by_group = {}
     total_tariff_base = 0
     reduction_applied = 0
@@ -126,42 +172,36 @@ def calculate_tariffs(selected_groups, user_duree_type):
 
     selected_forfait_ids = []
     for subject, group in selected_groups.items():
+        user_duree_type = user_duree_types[subject]
+        user_type_duree_id = user_type_duree_ids[subject]
+        id_forfait = group['id_forfait']
+        nom_forfait = forfaits_info[subject][id_forfait]['name']
         groupe_data = collection_groupes.get(ids=[group['id_cours']], include=["metadatas"])
-        if not groupe_data['metadatas'] or 'duree_tarifs' not in groupe_data['metadatas'][0]:
-            return None, f"Erreur : Données de tarification non trouvées pour le cours {group['id_cours']}.", None
+        if not groupe_data['metadatas']:
+            return None, f"Erreur : Données non trouvées pour le cours {group['id_cours']}.", None
         
-        duree_tarifs = groupe_data['metadatas'][0]['duree_tarifs'].split(';')
-        tarif_unitaire = None
-        id_forfait = groupe_data['metadatas'][0].get('id_forfait', None)
-        if id_forfait is None:
-            return None, f"Erreur : Aucun id_forfait trouvé dans les métadonnées pour le cours {group['id_cours']}.", None
+        metadata = groupe_data['metadatas'][0]
+        group_id_forfait = metadata.get('id_forfait')
+        type_duree_id = metadata.get('type_duree_id')
+        tarif_unitaire = metadata.get('tarifunitaire')
         
-        for dt in duree_tarifs:
-            if not dt.strip():
-                continue
-            parts = dt.split(':')
-            if len(parts) != 3:
-                continue
-            name, forfait_id, tarif = parts[0], parts[1], parts[2]
-            try:
-                if name == user_duree_type and forfait_id == id_forfait:
-                    tarif_unitaire = float(tarif)
-                    break
-            except ValueError:
-                continue
-        
+        if group_id_forfait is None:
+            return None, f"Erreur : Aucun id_forfait trouvé pour le cours {group['id_cours']}.", None
+        if type_duree_id != user_type_duree_id:
+            return None, f"Erreur : Type de durée ID '{user_type_duree_id}' non disponible pour le cours {group['id_cours']}.", None
         if tarif_unitaire is None:
-            return None, f"Erreur : Type de durée '{user_duree_type}' avec id_forfait '{id_forfait}' non disponible pour le cours {group['id_cours']}.", None
+            return None, f"Erreur : Tarif unitaire non disponible pour le cours {group['id_cours']}.", None
         
         selected_forfait_ids.append(id_forfait)
         remaining_sessions = get_remaining_sessions(group['id_cours'])
-        tarif_total = remaining_sessions * tarif_unitaire
+        tarif_total = remaining_sessions * float(tarif_unitaire)
         
         tariffs_by_group[subject] = {
             "id_cours": group['id_cours'],
             "id_forfait": id_forfait,
+            "nom_forfait": nom_forfait,
             "remaining_sessions": remaining_sessions,
-            "tarif_unitaire": tarif_unitaire,
+            "tarif_unitaire": float(tarif_unitaire),
             "tarif_total": tarif_total
         }
         total_tariff_base += tarif_total
@@ -187,9 +227,9 @@ def calculate_tariffs(selected_groups, user_duree_type):
                 reduction_description = f"Réduction pour combinaison ({id_combinaison}) : -{reduction_amount:.2f} DH ({reduction_percentage:.2f}%)"
                 break
 
-    tariff_message = f"<b>Détails des tarifs (Type de durée : {user_duree_type}) :</b><br>"
+    tariff_message = "<b>Détails des tarifs :</b><br>"
     for subject, info in tariffs_by_group.items():
-        tariff_message += f"- {subject} : {info['remaining_sessions']} séances restantes, tarif unitaire {info['tarif_unitaire']} DH, tarif total {info['tarif_total']:.2f} DH<br>"
+        tariff_message += f"- {subject} ([{info['id_forfait']}] {info['nom_forfait']}, Type de durée : {user_duree_types[subject]}) : {info['remaining_sessions']} séances restantes, tarif unitaire {info['tarif_unitaire']} DH, tarif total {info['tarif_total']:.2f} DH<br>"
     tariff_message += f"<b>Total de base :</b> {sum(info['tarif_total'] for info in tariffs_by_group.values()):.2f} DH<br>"
     if reduction_applied > 0:
         tariff_message += f"{reduction_description}<br>"
@@ -199,7 +239,7 @@ def calculate_tariffs(selected_groups, user_duree_type):
     
     return tariffs_by_group, tariff_message, total_tariff_base
 
-def get_recommendations(student_name, user_level, user_subjects, user_teachers, user_school, user_center):
+def get_recommendations(student_name, user_level, user_subjects, user_teachers, user_school, user_center, selected_forfaits, selected_types_duree, forfaits_info):
     output = []
     matched_level = match_value(user_level, levels)[0]
     matched_subjects = [match_value(subj.strip(), subjects)[0] for subj in user_subjects.split(",")]
@@ -211,10 +251,19 @@ def get_recommendations(student_name, user_level, user_subjects, user_teachers, 
     all_groups_for_selection = {}
 
     for matched_subject, matched_teacher in zip(matched_subjects, matched_teachers):
+        id_forfait = selected_forfaits.get(matched_subject)
+        type_duree_id = selected_types_duree.get(matched_subject)
+        if not id_forfait or not type_duree_id:
+            output.append(f"Aucun forfait ou type de durée sélectionné pour {matched_subject}.")
+            continue
+
         all_groups_data = collection_groupes.get(include=["metadatas", "documents"])
         groups = {}
         for metadata, document in zip(all_groups_data['metadatas'], all_groups_data['documents']):
-            if metadata['niveau'].strip().lower() == matched_level.strip().lower() and metadata['matiere'].strip().lower() == matched_subject.strip().lower():
+            if (metadata['niveau'].strip().lower() == matched_level.strip().lower() and
+                metadata['matiere'].strip().lower() == matched_subject.strip().lower() and
+                metadata.get('id_forfait') == id_forfait and
+                metadata.get('type_duree_id') == type_duree_id):
                 group_schools = [school.strip() for school in metadata['ecole'].split(", ")]
                 group_students = [student.strip() for student in metadata.get('student', '').split(", ")] or [f"Étudiant_{i}" for i in range(int(metadata['num_students']))]
 
@@ -234,7 +283,6 @@ def get_recommendations(student_name, user_level, user_subjects, user_teachers, 
                     "id_cours": metadata['id_cours'],
                     "name_cours": metadata['name_cours'],
                     "num_students": num_students,
-                    "total_students": int(metadata['total_students']),
                     "description": document,
                     "centre": metadata['centre'],
                     "teacher": metadata['teacher'],
@@ -246,11 +294,14 @@ def get_recommendations(student_name, user_level, user_subjects, user_teachers, 
                     "heure_fin": metadata['heure_fin'],
                     "jour": metadata['jour'] if metadata.get('jour') else "None",
                     "niveau": metadata['niveau'],
-                    "matiere": metadata['matiere']
+                    "matiere": metadata['matiere'],
+                    "id_forfait": metadata['id_forfait'],
+                    "nom_forfait": metadata['nom_forfait'],
+                    "type_duree_id": metadata['type_duree_id']
                 }
 
         if not groups:
-            output.append(f"Aucun groupe trouvé pour {matched_subject} au niveau {matched_level}.")
+            output.append(f"Aucun groupe trouvé pour {matched_subject} avec le forfait [{id_forfait}] {forfaits_info[matched_subject][id_forfait]['name']} et le type de durée sélectionné.")
             continue
 
         group_list = list(groups.values())
@@ -339,6 +390,7 @@ def get_recommendations(student_name, user_level, user_subjects, user_teachers, 
                 f"<h4>Groupe {i} ({matched_subject})</h4>"
                 f"<b>ID:</b> {group['id_cours']}<br>"
                 f"<b>Nom:</b> {group['name_cours']}<br>"
+                f"<b>Forfait:</b> [{group['id_forfait']}] {group['nom_forfait']}<br>"
                 f"<b>Nombre d'étudiants :</b> {group['num_students']}<br>"
                 f"<b>Professeur:</b> {group['teacher']}<br>"
                 f"<b>Centre:</b> {group['centre']}<br>"
@@ -360,7 +412,10 @@ def get_recommendations(student_name, user_level, user_subjects, user_teachers, 
                 "heure_fin": group['heure_fin'],
                 "jour": group['jour'],
                 "matiere": group['matiere'],
-                "criteria": group['criteria']
+                "criteria": group['criteria'],
+                "id_forfait": group['id_forfait'],
+                "nom_forfait": group['nom_forfait'],
+                "type_duree_id": group['type_duree_id']
             })
         
         all_recommendations[matched_subject] = recommendations
@@ -450,6 +505,10 @@ with st.sidebar:
         st.session_state.course_choices = {}
         st.session_state.tariffs_by_group = {}
         st.session_state.total_tariff_base = 0
+        st.session_state.available_forfaits = {}
+        st.session_state.available_types_duree = {}
+        st.session_state.selected_forfaits = {}
+        st.session_state.selected_types_duree = {}
         st.rerun()
     st.write("---")
     st.write("**À propos**")
@@ -472,6 +531,10 @@ if 'step' not in st.session_state:
     st.session_state.course_choices = {}
     st.session_state.tariffs_by_group = {}
     st.session_state.total_tariff_base = 0
+    st.session_state.available_forfaits = {}
+    st.session_state.available_types_duree = {}
+    st.session_state.selected_forfaits = {}
+    st.session_state.selected_types_duree = {}
 
 # Afficher les messages précédents
 st.markdown("<div class='container'>", unsafe_allow_html=True)
@@ -486,10 +549,11 @@ questions = [
     "Quelles sont les matières qui intéressent l'étudiant ?",
     "Quelles sont les notes de l'étudiant pour ces matières ? (facultatif)",
     "Veuillez choisir le type de cours pour chaque matière (indiv/groupe)",
+    "Veuillez choisir un forfait pour chaque matière en groupe",
+    "Veuillez choisir le type de durée pour chaque forfait",
     "Quels sont les professeurs actuels de l'étudiant pour ces matières ?",
     "Quelle est l'école de l'étudiant (obligatoire) ?",
     "Quel est le centre souhaité par l'étudiant ?",
-    "Quel est le type de durée souhaité ?",
     "Veuillez sélectionner un groupe pour chaque matière",
     "Voulez-vous inclure les frais d'inscription (250 DH par matière en groupe) ?",
     "Voulez-vous traiter un autre cas ?"
@@ -501,10 +565,11 @@ placeholders = [
     f"Ex: {', '.join(subjects_list[:3]) if subjects_list else 'Français, Maths'}",
     "Ex: 12, 15 (ou laissez vide)",
     "Ex: indiv, groupe",
+    "Ex: 1, 2 (numéro du forfait)",
+    "Ex: 1, 2 (numéro du type de durée)",
     "Ex: John Doe, Jane Smith (facultatif, peut être vide ou partiel)",
     f"Ex: {schools_list[0] if schools_list else 'Massignon Bouskoura'}",
     f"Ex: {centers_list[0] if centers_list else 'Centre A'} (ou laissez vide)",
-    f"Ex: {', '.join(duree_types_list[:2]) if duree_types_list else 'MF Trimestre 1'}",
     "Ex: 1, 2",
     "Oui ou Non",
     "Oui ou Non"
@@ -627,16 +692,127 @@ def handle_input_submission(step, response):
                 
                 if not group_subjects:
                     st.session_state.messages.append(("<div class='bot-message'>Aucune matière en groupe sélectionnée. Voulez-vous traiter un autre cas ? (Oui/Non)</div>", True))
-                    st.session_state.step = 12
+                    st.session_state.step = 13
                 else:
                     st.session_state.matched_subjects = group_subjects
                     st.session_state.responses['user_subjects'] = ', '.join(group_subjects)
-                    st.session_state.messages.append(("<div class='bot-message'>Quels sont les professeurs actuels de l'étudiant pour ces matières ?</div>", True))
+                    
+                    # Afficher les forfaits disponibles
+                    forfaits_message = "<div class='bot-message'>Veuillez choisir un forfait pour chaque matière en groupe :<br>"
+                    st.session_state.available_forfaits = {}
+                    for subject in group_subjects:
+                        forfaits = get_available_forfaits(st.session_state.responses['user_level'], subject)
+                        st.session_state.available_forfaits[subject] = forfaits
+                        if forfaits:
+                            forfaits_message += f"<h3>{subject}</h3>"
+                            for i, (id_forfait, info) in enumerate(forfaits.items(), 1):
+                                forfaits_message += f"{i}. [{id_forfait}] {info['name']}<br>"
+                        else:
+                            forfaits_message += f"<h3>{subject}</h3>Aucun forfait disponible.<br>"
+                    forfaits_message += f"Entrez les numéros des forfaits choisis pour chaque matière dans l'ordre ({', '.join(group_subjects)}):"
+                    st.session_state.messages.append((forfaits_message, True))
                     st.session_state.step = 6
         else:
             st.session_state.messages.append(("<div class='bot-message'>Ce champ est obligatoire. Veuillez indiquer vos choix (indiv/groupe).</div>", True))
     
-    elif step == 6:  # Professeurs
+    elif step == 6:  # Choix des forfaits
+        if response.strip():
+            try:
+                selections = [int(s.strip()) for s in response.split(',')]
+                group_subjects = st.session_state.matched_subjects
+                if len(selections) != len(group_subjects):
+                    st.session_state.messages.append(("<div class='bot-message'>Erreur : Vous devez sélectionner un forfait pour chaque matière ({len(group_subjects)} sélections requises). Ressaisissez :</div>", True))
+                    return
+                
+                st.session_state.selected_forfaits = {}
+                valid = True
+                for subject, selection in zip(group_subjects, selections):
+                    forfaits = st.session_state.available_forfaits.get(subject, {})
+                    forfait_list = list(forfaits.keys())
+                    if 1 <= selection <= len(forfait_list):
+                        id_forfait = forfait_list[selection - 1]
+                        st.session_state.selected_forfaits[subject] = id_forfait
+                    else:
+                        valid = False
+                        st.session_state.messages.append(("<div class='bot-message'>Erreur : Sélection invalide pour {subject}. Choisissez un numéro entre 1 et {len(forfait_list)}. Ressaisissez :</div>", True))
+                        break
+                
+                if valid:
+                    st.session_state.responses['forfait_selections'] = response
+                    st.session_state.messages.append((f"<div class='user-message'>{response}</div>", False))
+                    
+                    # Vérifier les types de durée pour chaque forfait
+                    types_duree_message = "<div class='bot-message'>Veuillez choisir le type de durée pour chaque forfait :<br>"
+                    st.session_state.available_types_duree = {}
+                    valid_subjects = []
+                    no_types_duree_subjects = []
+                    
+                    for subject in group_subjects:
+                        id_forfait = st.session_state.selected_forfaits[subject]
+                        types_duree = st.session_state.available_forfaits[subject][id_forfait]['types_duree']
+                        st.session_state.available_types_duree[subject] = types_duree
+                        if types_duree:
+                            valid_subjects.append(subject)
+                            types_duree_message += f"<h3>{subject} ([{id_forfait}] {st.session_state.available_forfaits[subject][id_forfait]['name']})</h3>"
+                            for i, (type_id, info) in enumerate(types_duree.items(), 1):
+                                types_duree_message += f"{i}. {info['name']} (Tarif unitaire: {info['tarif_unitaire']} DH)<br>"
+                        else:
+                            no_types_duree_subjects.append(subject)
+                            types_duree_message += f"<h3>{subject} ([{id_forfait}] {st.session_state.available_forfaits[subject][id_forfait]['name']})</h3>Aucun type de durée disponible.<br>"
+                    
+                    if not valid_subjects:
+                        # Aucun type de durée disponible pour aucune matière
+                        types_duree_message += "<b>Erreur :</b> Aucun type de durée disponible pour les forfaits sélectionnés.<br>"
+                        types_duree_message += "Voulez-vous traiter un autre cas ? (Oui/Non)"
+                        st.session_state.messages.append((types_duree_message, True))
+                        st.session_state.step = 13
+                    else:
+                        # Afficher les types de durée pour les matières valides
+                        if no_types_duree_subjects:
+                            types_duree_message += "<b>Attention :</b> Aucun type de durée disponible pour : " + ", ".join(no_types_duree_subjects) + ".<br>"
+                            types_duree_message += "Ces matières ne seront pas traitées.<br><br>"
+                        types_duree_message += f"Entrez les numéros des types de durée choisis pour chaque matière dans l'ordre ({', '.join(valid_subjects)}):"
+                        st.session_state.messages.append((types_duree_message, True))
+                        st.session_state.matched_subjects = valid_subjects  # Mettre à jour les matières à traiter
+                        st.session_state.step = 7
+            except ValueError:
+                st.session_state.messages.append(("<div class='bot-message'>Erreur : Les sélections doivent être des nombres (ex. 1, 2). Ressaisissez :</div>", True))
+        else:
+            st.session_state.messages.append(("<div class='bot-message'>Ce champ est obligatoire. Veuillez sélectionner des forfaits.</div>", True))
+        
+    elif step == 7:  # Choix des types de durée
+        if response.strip():
+            try:
+                selections = [int(s.strip()) for s in response.split(',')]
+                group_subjects = st.session_state.matched_subjects
+                if len(selections) != len(group_subjects):
+                    st.session_state.messages.append(("<div class='bot-message'>Erreur : Vous devez sélectionner un type de durée pour chaque matière ({len(group_subjects)} sélections requises). Ressaisissez :</div>", True))
+                    return
+                
+                st.session_state.selected_types_duree = {}
+                valid = True
+                for subject, selection in zip(group_subjects, selections):
+                    types_duree = st.session_state.available_types_duree.get(subject, {})
+                    type_list = list(types_duree.keys())
+                    if selection <= len(type_list):
+                        type_id = type_list[selection - 1]
+                        st.session_state.selected_types_duree[subject] = type_id
+                    else:
+                        valid = False
+                        st.session_state.messages.append(("<div class='bot-message'>Erreur : Sélection invalide pour {subject}. Ressaisissez :</div>", True))
+                        break
+                
+                if valid:
+                    st.session_state.responses['type_duree_selections'] = response
+                    st.session_state.messages.append((f"<div class='user-message'>{response}</div>", False))
+                    st.session_state.messages.append(("<div class='bot-message'>Quels sont les professeurs actuels de l'étudiant pour ces matières ?</div>", True))
+                    st.session_state.step = 8
+            except ValueError:
+                st.session_state.messages.append(("<div class='bot-message'>Erreur : Les sélections doivent être des nombres (ex. 1, 2). Ressaisissez :</div>", True))
+        else:
+            st.session_state.messages.append(("<div class='bot-message'>Ce champ est obligatoire. Veuillez sélectionner des types de durée.</div>", True))
+    
+    elif step == 8:  # Professeurs
         if response.strip():
             st.session_state.responses['user_teachers'] = response.strip()
             st.session_state.messages.append((f"<div class='user-message'>{response}</div>", False))
@@ -644,42 +820,26 @@ def handle_input_submission(step, response):
             st.session_state.responses['user_teachers'] = None
             st.session_state.messages.append(("<div class='user-message'>Aucun spécifié</div>", False))
         st.session_state.messages.append(("<div class='bot-message'>Quelle est l'école de l'étudiant (obligatoire) ?</div>", True))
-        st.session_state.step = 7
+        st.session_state.step = 9
     
-    elif step == 7:  # École
+    elif step == 9:  # École
         if response.strip():
             matched_school, is_valid = match_value(response.strip(), schools_list)
             if is_valid:
                 st.session_state.responses['user_school'] = matched_school
                 st.session_state.messages.append((f"<div class='user-message'>{response}</div>", False))
                 st.session_state.messages.append(("<div class='bot-message'>Quel est le centre souhaité par l'étudiant ?</div>", True))
-                st.session_state.step = 8
+                st.session_state.step = 10
             else:
                 st.session_state.messages.append(("<div class='bot-message'>Erreur : L'école '{response}' n'est pas valide. Veuillez choisir parmi : {', '.join(schools_list)}. Ressaisissez :</div>", True))
         else:
             st.session_state.messages.append(("<div class='bot-message'>Ce champ est obligatoire. Veuillez entrer une école valide.</div>", True))
     
-    elif step == 8:  # Centre
+    elif step == 10:  # Centre
         if response.strip():
             matched_center, is_valid = match_value(response.strip(), centers_list)
             if is_valid:
                 st.session_state.responses['user_center'] = matched_center
-                st.session_state.messages.append(("<div class='user-message'>{response}</div>", False))
-                st.session_state.messages.append(("<div class='bot-message'>Quel est le type de durée souhaité ?</div>", True))
-                st.session_state.step = 9
-            else:
-                st.session_state.messages.append(("<div class='bot-message'>Erreur : Le centre '{response}' n'est pas valide. Veuillez choisir parmi : {', '.join(centers_list)} ou laissez vide. Ressaisissez :</div>", True))
-        else:
-            st.session_state.responses['user_center'] = None
-            st.session_state.messages.append(("<div class='user-message'>Aucun spécifié</div>", False))
-            st.session_state.messages.append(("<div class='bot-message'>Quel est le type de durée souhaité ?</div>", True))
-            st.session_state.step = 9
-    
-    elif step == 9:  # Type de durée
-        if response.strip():
-            matched_duree, is_valid = match_value(response.strip(), duree_types_list)
-            if is_valid:
-                st.session_state.responses['user_duree_type'] = matched_duree
                 st.session_state.messages.append((f"<div class='user-message'>{response}</div>", False))
                 
                 group_subjects = st.session_state.matched_subjects
@@ -690,7 +850,10 @@ def handle_input_submission(step, response):
                         ', '.join(group_subjects),
                         st.session_state.responses.get('user_teachers', ''),
                         st.session_state.responses['user_school'],
-                        st.session_state.responses.get('user_center', '')
+                        st.session_state.responses.get('user_center', ''),
+                        st.session_state.selected_forfaits,
+                        st.session_state.selected_types_duree,
+                        st.session_state.available_forfaits
                     )
                 st.session_state.all_recommendations = all_recommendations
                 st.session_state.all_groups_for_selection = all_groups_for_selection
@@ -705,7 +868,7 @@ def handle_input_submission(step, response):
                 if not any(st.session_state.all_groups_for_selection.values()):
                     st.session_state.messages.append(("<div class='bot-message'>Aucun groupe disponible pour sélection.</div>", True))
                     st.session_state.messages.append(("<div class='bot-message'>Voulez-vous traiter un autre cas ? (Oui/Non)</div>", True))
-                    st.session_state.step = 12
+                    st.session_state.step = 13
                 else:
                     groups_message = "<div class='bot-message'>Voici les groupes recommandés pour les matières en groupe :<br>"
                     for subject in matched_subjects:
@@ -716,13 +879,53 @@ def handle_input_submission(step, response):
                                 groups_message += f"{group['display']}<br>"
                     groups_message += f"Veuillez entrer les numéros des groupes choisis pour chaque matière dans l'ordre ({', '.join(matched_subjects)}):</div>"
                     st.session_state.messages.append((groups_message, True))
-                    st.session_state.step = 10
+                    st.session_state.step = 11
             else:
-                st.session_state.messages.append(("<div class='bot-message'>Erreur : Le type de durée '{response}' n'est pas valide. Veuillez choisir parmi : {', '.join(duree_types_list)}. Ressaisissez :</div>", True))
+                st.session_state.messages.append(("<div class='bot-message'>Erreur : Le centre '{response}' n'est pas valide. Veuillez choisir parmi : {', '.join(centers_list)} ou laissez vide. Ressaisissez :</div>", True))
         else:
-            st.session_state.messages.append(("<div class='bot-message'>Ce champ est obligatoire. Veuillez entrer un type de durée valide.</div>", True))
+            st.session_state.responses['user_center'] = None
+            st.session_state.messages.append(("<div class='user-message'>Aucun spécifié</div>", False))
+            
+            group_subjects = st.session_state.matched_subjects
+            with st.spinner("Recherche en cours..."):
+                output, all_recommendations, all_groups_for_selection, matched_subjects = get_recommendations(
+                    st.session_state.responses['student_name'],
+                    st.session_state.responses['user_level'],
+                    ', '.join(group_subjects),
+                    st.session_state.responses.get('user_teachers', ''),
+                    st.session_state.responses['user_school'],
+                    st.session_state.responses.get('user_center', ''),
+                    st.session_state.selected_forfaits,
+                    st.session_state.selected_types_duree,
+                    st.session_state.available_forfaits
+                )
+            st.session_state.all_recommendations = all_recommendations
+            st.session_state.all_groups_for_selection = all_groups_for_selection
+            st.session_state.matched_subjects = matched_subjects
+
+            for msg in output:
+                st.session_state.messages.append((f"<div class='bot-message'>{msg}</div>", True))
+            for subject in matched_subjects:
+                for rec in all_recommendations.get(subject, []):
+                    st.session_state.messages.append((f"<div class='bot-message'>{rec}</div>", True))
+            
+            if not any(st.session_state.all_groups_for_selection.values()):
+                st.session_state.messages.append(("<div class='bot-message'>Aucun groupe disponible pour sélection.</div>", True))
+                st.session_state.messages.append(("<div class='bot-message'>Voulez-vous traiter un autre cas ? (Oui/Non)</div>", True))
+                st.session_state.step = 13
+            else:
+                groups_message = "<div class='bot-message'>Voici les groupes recommandés pour les matières en groupe :<br>"
+                for subject in matched_subjects:
+                    groups = st.session_state.all_groups_for_selection.get(subject, [])
+                    if groups:
+                        groups_message += f"<h3>{subject}</h3>"
+                        for i, group in enumerate(groups, 1):
+                            groups_message += f"{group['display']}<br>"
+                groups_message += f"Veuillez entrer les numéros des groupes choisis pour chaque matière dans l'ordre ({', '.join(matched_subjects)}):</div>"
+                st.session_state.messages.append((groups_message, True))
+                st.session_state.step = 11
     
-    elif step == 10:  # Sélection des groupes
+    elif step == 11:  # Sélection des groupes
         if response.strip():
             try:
                 selections = [int(s.strip()) for s in response.split(',')]
@@ -745,7 +948,7 @@ def handle_input_submission(step, response):
                         if selection <= len(groups):
                             selected_groups[subject] = groups[selection - 1]
                         else:
-                            st.session_state.messages.append(("<div class='bot-message'>Erreur : Sélection invalide pour {subject}. Ressaisissez :</div>", True))
+                            st.session_state.messages.append((f"<div class='bot-message'>Erreur : Sélection invalide pour {subject}. Ressaisissez :</div>", True))
                             groups_message = "<div class='bot-message'>Voici les groupes recommandés pour les matières en groupe :<br>"
                             for subj in matched_subjects:
                                 grps = st.session_state.all_groups_for_selection.get(subj, [])
@@ -781,14 +984,20 @@ def handle_input_submission(step, response):
                     
                     st.session_state.selected_groups = selected_groups
                     
+                    # Créer un dictionnaire des noms des types de durée
+                    user_duree_types = {subject: st.session_state.available_types_duree[subject][type_id]['name']
+                                       for subject, type_id in st.session_state.selected_types_duree.items()}
+                    
                     tariffs_by_group, tariff_message, total_tariff_base = calculate_tariffs(
                         selected_groups,
-                        st.session_state.responses['user_duree_type']
+                        user_duree_types,
+                        st.session_state.selected_types_duree,
+                        st.session_state.available_forfaits
                     )
                     if tariffs_by_group is None:
                         st.session_state.messages.append((f"<div class='bot-message'>{tariff_message}</div>", True))
                         st.session_state.messages.append(("<div class='bot-message'>Voulez-vous traiter un autre cas ? (Oui/Non)</div>", True))
-                        st.session_state.step = 12
+                        st.session_state.step = 13
                         return
                     
                     st.session_state.tariffs_by_group = tariffs_by_group
@@ -798,10 +1007,10 @@ def handle_input_submission(step, response):
                     
                     num_group_subjects = len(matched_subjects)
                     if num_group_subjects > 0:
-                        frais_inscription = 250
+                        frais_inscription =  250
                         frais_message = f"<div class='bot-message'>Voulez-vous inclure les frais d'inscription : {frais_inscription} DH ? (Oui/Non)</div>"
                         st.session_state.messages.append((frais_message, True))
-                        st.session_state.step = 11
+                        st.session_state.step = 12
             except ValueError:
                 st.session_state.messages.append(("<div class='bot-message'>Erreur : Les sélections doivent être des nombres (ex. 1, 2). Ressaisissez :</div>", True))
                 groups_message = "<div class='bot-message'>Voici les groupes recommandés pour les matières en groupe :<br>"
@@ -816,11 +1025,11 @@ def handle_input_submission(step, response):
         else:
             st.session_state.messages.append(("<div class='bot-message'>Ce champ est obligatoire. Veuillez sélectionner des groupes.</div>", True))
     
-    elif step == 11:  # Frais d'inscription
+    elif step == 12:  # Frais d'inscription
         choice = response.strip().lower()
         if choice in ['oui', 'yes']:
             num_group_subjects = len(st.session_state.matched_subjects)
-            frais_inscription =  250
+            frais_inscription = 250
             st.session_state.messages.append((f"<div class='user-message'>{response}</div>", False))
             frais_message = f"<div class='bot-message'>Frais d'inscription inclus : {frais_inscription} DH </div>"
             st.session_state.messages.append((frais_message, True))
@@ -830,18 +1039,18 @@ def handle_input_submission(step, response):
             st.session_state.messages.append((total_message, True))
             
             st.session_state.messages.append(("<div class='bot-message'>Voulez-vous traiter un autre cas ? (Oui/Non)</div>", True))
-            st.session_state.step = 12
+            st.session_state.step = 13
         elif choice in ['non', 'no']:
             st.session_state.messages.append((f"<div class='user-message'>{response}</div>", False))
             total_message = f"<div class='bot-message'>Total final (sans frais d'inscription) : {st.session_state.total_tariff_base:.2f} DH</div>"
             st.session_state.messages.append((total_message, True))
             
             st.session_state.messages.append(("<div class='bot-message'>Voulez-vous traiter un autre cas ? (Oui/Non)</div>", True))
-            st.session_state.step = 12
+            st.session_state.step = 13
         else:
             st.session_state.messages.append(("<div class='bot-message'>Veuillez répondre par 'Oui' ou 'Non'.</div>", True))
     
-    elif step == 12:  # Traiter un autre cas
+    elif step == 13:  # Traiter un autre cas
         choice = response.strip().lower()
         if choice in ['oui', 'yes']:
             st.session_state.messages.append((f"<div class='user-message'>{response}</div>", False))
@@ -860,11 +1069,15 @@ def handle_input_submission(step, response):
             st.session_state.course_choices = {}
             st.session_state.tariffs_by_group = {}
             st.session_state.total_tariff_base = 0
+            st.session_state.available_forfaits = {}
+            st.session_state.available_types_duree = {}
+            st.session_state.selected_forfaits = {}
+            st.session_state.selected_types_duree = {}
             st.rerun()
         elif choice in ['non', 'no']:
             st.session_state.messages.append((f"<div class='user-message'>{response}</div>", False))
             st.session_state.messages.append(("<div class='bot-message'>Merci d'avoir utilisé le chatbot. Au revoir !</div>", True))
-            st.session_state.step = 13
+            st.session_state.step = 14
         else:
             st.session_state.messages.append(("<div class='bot-message'>Veuillez répondre par 'Oui' ou 'Non'.</div>", True))
 
@@ -884,9 +1097,13 @@ if st.session_state.step == 0:
     st.session_state.course_choices = {}
     st.session_state.tariffs_by_group = {}
     st.session_state.total_tariff_base = 0
+    st.session_state.available_forfaits = {}
+    st.session_state.available_types_duree = {}
+    st.session_state.selected_forfaits = {}
+    st.session_state.selected_types_duree = {}
     st.rerun()
 
-elif st.session_state.step in [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]:
+elif st.session_state.step in [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13]:
     input_key = f"input_step_{st.session_state.step}_{st.session_state.input_counter}"
     response = st.text_input("Votre réponse :", key=input_key, placeholder=placeholders[st.session_state.step - 1])
     

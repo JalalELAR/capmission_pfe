@@ -79,9 +79,6 @@ def get_available_forfaits(level, subject):
             id_forfait = metadata.get('id_forfait')
             nom_forfait = metadata.get('nom_forfait', 'Forfait inconnu')
             duree_tarifs = metadata.get('duree_tarifs', '')
-            print(f"Groupe correspondant trouvé : id_cours={metadata['id_cours']}, "
-                  f"matière={metadata['matiere']}, id_forfait={id_forfait}, "
-                  f"nom_forfait={nom_forfait}, duree_tarifs={duree_tarifs}")
             # Inclure le forfait si id_forfait existe
             if id_forfait:
                 if id_forfait not in forfaits:
@@ -510,6 +507,7 @@ with st.sidebar:
         st.session_state.available_types_duree = {}
         st.session_state.selected_forfaits = {}
         st.session_state.selected_types_duree = {}
+        st.session_state.reduction_percentage = 0
         st.rerun()
     st.write("---")
     st.write("**À propos**")
@@ -536,6 +534,7 @@ if 'step' not in st.session_state:
     st.session_state.available_types_duree = {}
     st.session_state.selected_forfaits = {}
     st.session_state.selected_types_duree = {}
+    st.session_state.reduction_percentage = 0
 
 # Afficher les messages précédents
 st.markdown("<div class='container'>", unsafe_allow_html=True)
@@ -557,6 +556,8 @@ questions = [
     "Quel est le centre souhaité par l'étudiant ?",
     "Veuillez sélectionner un groupe pour chaque matière",
     "Voulez-vous inclure les frais d'inscription (250 DH par matière en groupe) ?",
+    "Y a-t-il des commentaires ou demandes supplémentaires ?",
+    "Quel est le pourcentage de réduction que vous souhaitez appliquer ?",
     "Voulez-vous traiter un autre cas ?"
 ]
 
@@ -573,6 +574,8 @@ placeholders = [
     f"Ex: {centers_list[0] if centers_list else 'Centre A'} (ou laissez vide)",
     "Ex: 1, 2",
     "Oui ou Non",
+    "Ex: J'aimerais une réduction",
+    "Ex: 10 (entre 0 et 100)",
     "Oui ou Non"
 ]
 
@@ -693,7 +696,7 @@ def handle_input_submission(step, response):
                 
                 if not group_subjects:
                     st.session_state.messages.append(("<div class='bot-message'>Aucune matière en groupe sélectionnée. Voulez-vous traiter un autre cas ? (Oui/Non)</div>", True))
-                    st.session_state.step = 13
+                    st.session_state.step = 14
                 else:
                     st.session_state.matched_subjects = group_subjects
                     st.session_state.responses['user_subjects'] = ', '.join(group_subjects)
@@ -766,7 +769,7 @@ def handle_input_submission(step, response):
                         types_duree_message += "<b>Erreur :</b> Aucun type de durée disponible pour les forfaits sélectionnés.<br>"
                         types_duree_message += "Voulez-vous traiter un autre cas ? (Oui/Non)"
                         st.session_state.messages.append((types_duree_message, True))
-                        st.session_state.step = 13
+                        st.session_state.step = 14
                     else:
                         # Afficher les types de durée pour les matières valides
                         if no_types_duree_subjects:
@@ -869,7 +872,7 @@ def handle_input_submission(step, response):
                 if not any(st.session_state.all_groups_for_selection.values()):
                     st.session_state.messages.append(("<div class='bot-message'>Aucun groupe disponible pour sélection.</div>", True))
                     st.session_state.messages.append(("<div class='bot-message'>Voulez-vous traiter un autre cas ? (Oui/Non)</div>", True))
-                    st.session_state.step = 13
+                    st.session_state.step = 14
                 else:
                     groups_message = "<div class='bot-message'>Voici les groupes recommandés pour les matières en groupe :<br>"
                     for subject in matched_subjects:
@@ -913,7 +916,7 @@ def handle_input_submission(step, response):
             if not any(st.session_state.all_groups_for_selection.values()):
                 st.session_state.messages.append(("<div class='bot-message'>Aucun groupe disponible pour sélection.</div>", True))
                 st.session_state.messages.append(("<div class='bot-message'>Voulez-vous traiter un autre cas ? (Oui/Non)</div>", True))
-                st.session_state.step = 13
+                st.session_state.step = 14
             else:
                 groups_message = "<div class='bot-message'>Voici les groupes recommandés pour les matières en groupe :<br>"
                 for subject in matched_subjects:
@@ -998,7 +1001,7 @@ def handle_input_submission(step, response):
                     if tariffs_by_group is None:
                         st.session_state.messages.append((f"<div class='bot-message'>{tariff_message}</div>", True))
                         st.session_state.messages.append(("<div class='bot-message'>Voulez-vous traiter un autre cas ? (Oui/Non)</div>", True))
-                        st.session_state.step = 13
+                        st.session_state.step = 14
                         return
                     
                     st.session_state.tariffs_by_group = tariffs_by_group
@@ -1035,23 +1038,69 @@ def handle_input_submission(step, response):
             frais_message = f"<div class='bot-message'>Frais d'inscription inclus : {frais_inscription} DH </div>"
             st.session_state.messages.append((frais_message, True))
             
-            total_final = st.session_state.total_tariff_base + frais_inscription
-            total_message = f"<div class='bot-message'>Total final (tarifs + frais d'inscription) : {total_final:.2f} DH</div>"
+            total_with_frais = st.session_state.total_tariff_base + frais_inscription
+            st.session_state.total_with_frais = total_with_frais
+            total_message = f"<div class='bot-message'>Total avec frais d'inscription : {total_with_frais:.2f} DH</div>"
             st.session_state.messages.append((total_message, True))
             
-            st.session_state.messages.append(("<div class='bot-message'>Voulez-vous traiter un autre cas ? (Oui/Non)</div>", True))
+            st.session_state.messages.append(("<div class='bot-message'>Y a-t-il des commentaires ou demandes supplémentaires ?</div>", True))
             st.session_state.step = 13
         elif choice in ['non', 'no']:
             st.session_state.messages.append((f"<div class='user-message'>{response}</div>", False))
-            total_message = f"<div class='bot-message'>Total final (sans frais d'inscription) : {st.session_state.total_tariff_base:.2f} DH</div>"
+            st.session_state.total_with_frais = st.session_state.total_tariff_base
+            total_message = f"<div class='bot-message'>Total sans frais d'inscription : {st.session_state.total_tariff_base:.2f} DH</div>"
             st.session_state.messages.append((total_message, True))
             
-            st.session_state.messages.append(("<div class='bot-message'>Voulez-vous traiter un autre cas ? (Oui/Non)</div>", True))
+            st.session_state.messages.append(("<div class='bot-message'>Y a-t-il des commentaires ou demandes supplémentaires ?</div>", True))
             st.session_state.step = 13
         else:
             st.session_state.messages.append(("<div class='bot-message'>Veuillez répondre par 'Oui' ou 'Non'.</div>", True))
     
-    elif step == 13:  # Traiter un autre cas
+    elif step == 13:  # Commentaires ou demandes supplémentaires
+        st.session_state.messages.append((f"<div class='user-message'>{response}</div>", False))
+        st.session_state.responses['commentaires'] = response.strip()
+        
+        # Vérifier si le commentaire contient "réduction" ou un mot similaire
+        reduction_keywords = ['réduction', 'reduction', 'remise', 'rabais', 'discount']
+        response_lower = response.strip().lower()
+        reduction_detected = False
+        for keyword in reduction_keywords:
+            match, score = process.extractOne(keyword, response_lower.split())
+            if score > 90:
+                reduction_detected = True
+                break
+        
+        if reduction_detected:
+            st.session_state.messages.append(("<div class='bot-message'>Quel est le pourcentage de réduction que vous souhaitez appliquer ? (Entre 0 et 100)</div>", True))
+            st.session_state.step = 14
+        else:
+            total_message = f"<div class='bot-message'>Total final : {st.session_state.total_with_frais:.2f} DH</div>"
+            st.session_state.messages.append((total_message, True))
+            st.session_state.messages.append(("<div class='bot-message'>Voulez-vous traiter un autre cas ? (Oui/Non)</div>", True))
+            st.session_state.step = 15
+    
+    elif step == 14:  # Pourcentage de réduction
+        try:
+            percentage = float(response.strip())
+            if 0 <= percentage <= 100:
+                st.session_state.messages.append((f"<div class='user-message'>{response}</div>", False))
+                st.session_state.reduction_percentage = percentage
+                total_base = st.session_state.total_with_frais
+                reduction_amount = st.session_state.total_with_frais * (percentage / 100)
+                total_final = st.session_state.total_with_frais - reduction_amount
+                reduction_message = f"<div class='bot-message'><b>Total de base</b> : {total_base:.2f} DH <br>"
+                reduction_message += f"<b>Réduction de {percentage}%</b> : -{reduction_amount:.2f} DH <br>"
+                reduction_message += f"<b>Total réduit</b> : {total_final:.2f} DH</div>"
+                st.session_state.messages.append((reduction_message, True))
+                
+                st.session_state.messages.append(("<div class='bot-message'>Voulez-vous traiter un autre cas ? (Oui/Non)</div>", True))
+                st.session_state.step = 15
+            else:
+                st.session_state.messages.append(("<div class='bot-message'>Erreur : Le pourcentage doit être entre 0 et 100. Ressaisissez :</div>", True))
+        except ValueError:
+            st.session_state.messages.append(("<div class='bot-message'>Erreur : Veuillez entrer un nombre valide (ex. 10). Ressaisissez :</div>", True))
+    
+    elif step == 15:  # Traiter un autre cas
         choice = response.strip().lower()
         if choice in ['oui', 'yes']:
             st.session_state.messages.append((f"<div class='user-message'>{response}</div>", False))
@@ -1074,11 +1123,12 @@ def handle_input_submission(step, response):
             st.session_state.available_types_duree = {}
             st.session_state.selected_forfaits = {}
             st.session_state.selected_types_duree = {}
+            st.session_state.reduction_percentage = 0
             st.rerun()
         elif choice in ['non', 'no']:
             st.session_state.messages.append((f"<div class='user-message'>{response}</div>", False))
             st.session_state.messages.append(("<div class='bot-message'>Merci d'avoir utilisé le chatbot. Au revoir !</div>", True))
-            st.session_state.step = 14
+            st.session_state.step = 16
         else:
             st.session_state.messages.append(("<div class='bot-message'>Veuillez répondre par 'Oui' ou 'Non'.</div>", True))
 
@@ -1102,9 +1152,10 @@ if st.session_state.step == 0:
     st.session_state.available_types_duree = {}
     st.session_state.selected_forfaits = {}
     st.session_state.selected_types_duree = {}
+    st.session_state.reduction_percentage = 0
     st.rerun()
 
-elif st.session_state.step in [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13]:
+elif st.session_state.step in [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]:
     input_key = f"input_step_{st.session_state.step}_{st.session_state.input_counter}"
     response = st.text_input("Votre réponse :", key=input_key, placeholder=placeholders[st.session_state.step - 1])
     
