@@ -1,6 +1,6 @@
-__import__('pysqlite3')
-import sys
-sys.modules['sqlite3'] = sys.modules.pop('pysqlite3') 
+#__import__('pysqlite3')
+#import sys
+#sys.modules['sqlite3'] = sys.modules.pop('pysqlite3') 
 import streamlit as st
 from sentence_transformers import SentenceTransformer
 from fuzzywuzzy import process
@@ -35,6 +35,7 @@ def load_model():
     return SentenceTransformer('all-MiniLM-L6-v2')
 
 # Récupérer toutes les valeurs uniques depuis ChromaDB (groupes)
+
 all_groups = collection_groupes.get(include=["metadatas", "documents"])
 schools = set()
 levels = set()
@@ -585,7 +586,7 @@ placeholders = [
 # Fonctions de gestion des étapes
 def handle_input_submission(step, response):
     if step == 1:  # Nom de l'étudiant
-        if response.strip():
+        if response.strip(): 
             students_data = collection_students.get(include=["metadatas"])
             student_exists = False
             for metadata in students_data['metadatas']:

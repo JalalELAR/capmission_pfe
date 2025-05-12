@@ -1,0 +1,137 @@
+[
+  {
+    "id": "55660884-5b40-4a8a-8950-eb3037507444",
+    "student_name": "Kenza Alami",
+    "timestamp": "2025-05-12 10:07:44",
+    "messages": [
+      [
+        "<div class='bot-message'>Bonjour cher conseiller, Dis moi ! Quel est le nom de l'étudiant ?</div>",
+        true
+      ],
+      [
+        "<div class='user-message'>Kenza Alami</div>",
+        false
+      ],
+      [
+        "<div class='bot-message'>Bonjour Kenza !  Pour commencer, quel est le niveau scolaire de l'étudiant ?</div>",
+        true
+      ],
+      [
+        "<div class='user-message'>BL - 2bac sc ex PC</div>",
+        false
+      ],
+      [
+        "<div class='bot-message'>Niveau BL - 2bac sc ex PC validé.  Quelles sont les matières que Kenza souhaite étudier ?</div>",
+        true
+      ],
+      [
+        "<div class='user-message'>Physique - Chimie , Mathématiques</div>",
+        false
+      ],
+      [
+        "<div class='bot-message'>Matières validées. Quelles sont les notes pour chaque matière ? (Séparez les notes par des virgules, ou écrivez 'sans notes' si vous ne souhaitez pas fournir de notes.)</div>",
+        true
+      ],
+      [
+        "<div class='user-message'>7,12</div>",
+        false
+      ],
+      [
+        "<div class='bot-message'>D’après vos réponses, une note de 7/20 en Physique-Chimie indique qu'un accompagnement individuel serait plus adapté pour consolider vos bases dans cette matière.  Pour les mathématiques, avec une note de 12/20, des cours en groupe pourraient être envisagés. Veuillez choisir le type de cours pour chaque matière (Physique - Chimie, Mathématiques) : (ex. indiv,groupe ou 'je veux groupe pour toutes les matières').</div>",
+        true
+      ],
+      [
+        "<div class='user-message'>je veux groupe pour toutes les matières</div>",
+        false
+      ],
+      [
+        "<div class='bot-message'>Parfait Kenza ! Vous avez choisi des cours en groupe pour Physique - Chimie et Mathématiques.  Les forfaits seront affichés à l'étape suivante.</div>",
+        true
+      ],
+      [
+        "<div class='bot-message'>Kenza Alami, vous avez choisi des cours en groupe pour Physique - Chimie, Mathématiques.<br>Veuillez choisir un forfait pour chaque matière (entrez les numéros dans l'ordre : Physique - Chimie, Mathématiques) :<br><h3>Physique - Chimie</h3>1. [12677992] BL-2BAC-PHYSIQUE - CHIMIE<br><h3>Mathématiques</h3>1. [12678012] BL-2BAC-MATHÉMATIQUES<br>Exemple : 1,2 pour choisir le forfait pour Physique - Chimie, Mathématiques.</div>",
+        true
+      ],
+      [
+        "<div class='user-message'>1,1</div>",
+        false
+      ],
+      [
+        "<div class='bot-message'>Parfait Kenza !  Vous avez sélectionné les forfaits suivants : \nPhysique - Chimie : BL-2BAC-PHYSIQUE - CHIMIE\nMathématiques : BL-2BAC-MATHÉMATIQUES\n\nPour finaliser, veuillez choisir le type de durée pour chaque forfait.  Voici les options disponibles :\n\nPhysique - Chimie:\n1. BL 2bac Période 4\n2. BL 2bac Période 1\n3. BL 2bac Période 2\n4. BL 2bac Période 3\n5. BL 2bac Période 5\n\nMathématiques:\n1. BL 2bac Période 4\n2. BL 2bac Période 1\n3. BL 2bac Période 2\n4. BL 2bac Période 3\n5. BL 2bac Période 5\n6. BL 2bac Période 5\n7. BL 2bac Période 1\n8. BL 2bac Période 2\n9. BL 2bac Période 3\n10. BL 2bac Période 5\n\nVeuillez indiquer votre choix sous la forme d'une liste d'indices séparés par des virgules (ex: 1,1 pour choisir la première option pour chaque matière).</div>",
+        true
+      ],
+      [
+        "<div class='bot-message'>Veuillez choisir le type de durée pour chaque forfait :<br><h3>Physique - Chimie ([12677992] BL-2BAC-PHYSIQUE - CHIMIE)</h3>1. BL 2bac Période 4 (Tarif unitaire: 270.0 DH)<br>2. BL 2bac Période 1 (Tarif unitaire: 270.0 DH)<br>3. BL 2bac Période 2 (Tarif unitaire: 270.0 DH)<br>4. BL 2bac Période 3 (Tarif unitaire: 270.0 DH)<br>5. BL 2bac Période 5 (Tarif unitaire: 270.0 DH)<br><h3>Mathématiques ([12678012] BL-2BAC-MATHÉMATIQUES)</h3>1. BL 2bac Période 4 (Tarif unitaire: 270.0 DH)<br>2. BL 2bac Période 1 (Tarif unitaire: 270.0 DH)<br>3. BL 2bac Période 2 (Tarif unitaire: 270.0 DH)<br>4. BL 2bac Période 3 (Tarif unitaire: 270.0 DH)<br>5. BL 2bac Période 5 (Tarif unitaire: 270.0 DH)<br>6. BL 2bac Période 5 (Tarif unitaire: 270.0 DH)<br>7. BL 2bac Période 1 (Tarif unitaire: 270.0 DH)<br>8. BL 2bac Période 2 (Tarif unitaire: 270.0 DH)<br>9. BL 2bac Période 3 (Tarif unitaire: 270.0 DH)<br>10. BL 2bac Période 5 (Tarif unitaire: 270.0 DH)<br>Entrez les numéros des types de durée choisis pour chaque matière dans l'ordre (Physique - Chimie, Mathématiques):",
+        true
+      ],
+      [
+        "<div class='user-message'>1,1</div>",
+        false
+      ],
+      [
+        "<div class='bot-message'>Parfaits ! Vous avez sélectionné la période 4 pour les deux matières.  Maintenant,  pouvez-vous me donner le nom du professeur pour chaque matière ? (ex: 'Professeur A, Professeur B')</div>",
+        true
+      ],
+      [
+        "<div class='user-message'>Fathia Laihemdi , Fekkak Alilou</div>",
+        false
+      ],
+      [
+        "<div class='bot-message'>Parfait Kenza,  les professeurs Fathia Laihemdi et Fekkak Alilou sont enregistrés.  Maintenant, pour finaliser, pourriez-vous me donner le nom de l'école de Kenza ?</div>",
+        true
+      ]
+    ],
+    "responses": {
+      "student_name": "Kenza Alami",
+      "user_level": "BL - 2bac sc ex PC",
+      "user_subjects": "Physique - Chimie,Mathématiques",
+      "subjects": [
+        "Physique - Chimie",
+        "Mathématiques"
+      ],
+      "grades": [
+        7,
+        12
+      ],
+      "course_choices": [
+        "groupe",
+        "groupe"
+      ],
+      "forfait_selections": {
+        "Physique - Chimie": "12677992",
+        "Mathématiques": "12678012"
+      },
+      "type_duree_selections": {
+        "Physique - Chimie": "12677992_1",
+        "Mathématiques": "12678012_1"
+      },
+      "user_teachers": [
+        "Fathia Laihemdi",
+        "Fekkak Alilou"
+      ]
+    },
+    "matched_subjects": [
+      "Physique - Chimie",
+      "Mathématiques"
+    ],
+    "selected_groups": {},
+    "tariffs_by_group": {},
+    "total_tariff_base": 0
+  },
+  {
+    "id": "ab4602e1-cc2b-4b1f-9a05-4f8b501c1411",
+    "student_name": "Inconnu",
+    "timestamp": "2025-05-12 10:07:45",
+    "messages": [
+      [
+        "<div class='bot-message'>Bonjour cher conseiller, Dis moi ! Quel est le nom de l'étudiant ?</div>",
+        true
+      ]
+    ],
+    "responses": {},
+    "matched_subjects": [],
+    "selected_groups": {},
+    "tariffs_by_group": {},
+    "total_tariff_base": 0
+  }
+]
