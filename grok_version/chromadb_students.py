@@ -13,17 +13,24 @@ db_config = {
     "password": "root"
 }
 
-# Requête SQL
+# Requête SQL avec student_id, niveau et école
 sql_query = """
-SELECT ct.id, concat(ct.firstname,' ',ct.lastname) AS student_name
-FROM cm_tiers ct
-JOIN mtm_role_tiers mrt ON ct.id = mrt.id_tiers
-JOIN cm_role cr ON cr.id = mrt.id_role
+SELECT 
+    ct.id, 
+    concat(ct.firstname, ' ', ct.lastname) AS student_name,
+    cn."name" AS niveau,
+    ce."name" AS ecole
+FROM cm_tiers ct 
+LEFT JOIN mtm_role_tiers mrt ON ct.id = mrt.id_tiers 
+LEFT JOIN cm_role cr ON cr.id = mrt.id_role 
+LEFT JOIN mtm_niveau_student mns ON ct.id = mns.id_tiers 
+LEFT JOIN cm_niveau cn ON cn.id = mns.id_niveau 
+LEFT JOIN cm_ecole ce ON ce.id = ct.mto_student_ecole 
 WHERE cr."name" = 'ROLE_STUDENT';
 """
 
 def get_students_from_db():
-    """Exécute la requête SQL et retourne la liste des étudiants avec leurs IDs."""
+    """Exécute la requête SQL et retourne la liste des étudiants avec leurs IDs, niveaux et écoles."""
     try:
         # Connexion à la base de données
         conn = psycopg2.connect(**db_config)
@@ -31,7 +38,7 @@ def get_students_from_db():
         
         # Exécuter la requête
         cursor.execute(sql_query)
-        students = [(str(row[0]), row[1].strip()) for row in cursor.fetchall() if row[1].strip()]
+        students = [(str(row[0]), row[1].strip(), row[2], row[3]) for row in cursor.fetchall() if row[1].strip()]
         
         # Fermer la connexion
         cursor.close()
@@ -45,7 +52,7 @@ def get_students_from_db():
         return []
 
 def vectorize_students(students):
-    """Vectorise les noms des étudiants et les stocke dans ChromaDB par lots."""
+    """Vectorise les noms des étudiants avec leurs niveaux et écoles, et les stocke dans ChromaDB par lots."""
     # Initialiser le modèle SentenceTransformer
     print("Chargement du modèle SentenceTransformer...")
     model = SentenceTransformer('all-MiniLM-L6-v2')
@@ -68,16 +75,24 @@ def vectorize_students(students):
     documents = []
     embeddings = []
     
-    print("Vectorisation des noms des étudiants...")
-    for student_id, student_name in tqdm(students, desc="Vectorisation"):
+    print("Vectorisation des étudiants avec leurs niveaux et écoles (valeurs nulles acceptées)...")
+    for student_id, student_name, niveau, ecole in tqdm(students, desc="Vectorisation"):
         if not student_name:
             continue
+        # Remplacer les valeurs nulles par "Inconnu" pour la vectorisation
+        niveau_text = niveau if niveau is not None else "Inconnu"
+        ecole_text = ecole if ecole is not None else "Inconnu"
+        # Combiner le nom, le niveau et l'école pour la vectorisation
+        document = f"{student_name} - Niveau Actuel : {niveau_text} - École : {ecole_text}"
         # Générer l'embedding
-        embedding = model.encode(student_name, convert_to_numpy=True).tolist()
+        embedding = model.encode(document, convert_to_numpy=True).tolist()
+        # Remplacer les valeurs nulles dans les métadonnées pour ChromaDB
+        metadata_niveau = niveau if niveau is not None else "Inconnu"
+        metadata_ecole = ecole if ecole is not None else "Inconnu"
         # Ajouter aux listes
         ids.append(student_id)
-        metadatas.append({"student_name": student_name})
-        documents.append(student_name)
+        metadatas.append({"student_name": student_name, "niveau": metadata_niveau, "ecole": metadata_ecole})
+        documents.append(document)
         embeddings.append(embedding)
     
     # Insérer par lots
@@ -114,7 +129,6 @@ def main():
     vectorize_students(students)
     
     # Vérification finale
-    # Initialiser ChromaDB
     client = chromadb.PersistentClient(path="./chroma_db5")
     collection = client.get_collection(name="students_vectorises")
     print(f"Total d'étudiants dans students_vectorises : {collection.count()}")
