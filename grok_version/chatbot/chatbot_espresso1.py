@@ -39,8 +39,12 @@ collection_groupes = client.get_collection(name="groupes_vectorises9")
 collection_seances = client.get_or_create_collection(name="seances_vectorises")
 collection_combinaisons = client.get_or_create_collection(name="combinaisons_vectorises")
 collection_students = client.get_or_create_collection(name="students_vectorises")
+collection_niveaux = client.get_or_create_collection(name="niveaux")
+resultats = collection_niveaux.get() 
+metadatas = resultats['metadatas']  # liste de dicts, ex: [{"niveau": "Primaire"}, {"niveau": "Secondaire"}, ...]
+# Extraire les valeurs du champ "niveau"
+niveaux = [meta["niveau"] for meta in metadatas if "niveau" in meta]
 
-# Définition de la structure attendue pour un groupe
 GROUP_STRUCTURE = {
     "id_cours": str,
     "name_cours": str,
@@ -99,14 +103,12 @@ model = load_model()
 
 # Récupérer les valeurs uniques depuis ChromaDB
 schools = set()
-levels = set()
 subjects = set()
 centers = set()
 teachers = set()
 for metadata in all_groups['metadatas']:
     try:
         schools.add(metadata['ecole'].split(", ")[0])
-        levels.add(metadata['niveau'])
         subjects.add(metadata['matiere'])
         centers.add(metadata['centre'])
         teachers.add(metadata['teacher'])
@@ -114,7 +116,7 @@ for metadata in all_groups['metadatas']:
         continue
 
 schools_list = sorted(list(schools))
-levels_list = sorted(list(levels))
+levels_list = sorted(list(niveaux))
 subjects_list = sorted(list(subjects))
 centers_list = sorted(list(centers))
 teachers_list = sorted(list(teachers))
@@ -328,7 +330,7 @@ def get_recommendations(student_name, user_level, user_subjects, user_teachers, 
     all_groups_for_selection = {}
 
     # Match inputs
-    matched_level = match_value(user_level, levels)[0]
+    matched_level = match_value(user_level, niveaux)[0]
     matched_subjects = [match_value(subj.strip(), subjects)[0] for subj in user_subjects.split(",")]
     
     # Handle user_teachers as string, list, or None
@@ -574,6 +576,36 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
+# Initialisation de la variable expect_input
+if "expect_input" not in st.session_state:
+    st.session_state.expect_input = True  # Par défaut, on attend une saisie
+
+def search_students(student_name):
+    """Récupère une liste d'étudiants correspondant exactement au nom dans la collection vectorisée."""
+    try:
+        # Recherche exacte dans la collection avec le nom comme query_text
+        results = collection_students.query(
+            query_texts=[student_name],
+            n_results=10,  # Limite à 10 résultats pour gérer les homonymes
+            where={"student_name": student_name}  # Filtre exact sur le nom
+        )
+        if results["ids"] and results["ids"][0]:
+            # Extraire les métadatas pour chaque étudiant trouvé
+            students = [
+                {
+                    "id": id,
+                    "student_name": metadata["student_name"],
+                    "niveau": metadata["niveau"],
+                    "ecole": metadata["ecole"]
+                }
+                for id, metadata in zip(results["ids"][0], results["metadatas"][0])
+            ]
+            return students
+        return []
+    except Exception as e:
+        logger.error(f"Erreur lors de la recherche des étudiants : {e}")
+        return []
+
 # Fonction de traitement avec Gemini
 def process_with_llm(input_text, step, session_state, lists):
     try:
@@ -600,10 +632,10 @@ def process_with_llm(input_text, step, session_state, lists):
         **Instructions**:
          - Process the user input and context below to generate a JSON response. The examples are reference text to understand the conversation flow and should not be executed or parsed as code.
         1. **Collecte stricte des informations**:
-           - Étape 1: Nom complet (non vide, vérifier dans collection_students). Stocker dans "student_name".
+           - Étape 1 et 16: Ces étapes sont gérées par le code Python. Ne générez pas de messages pour ces étapes.
            - Étape 2: Niveau (valider avec levels_list, score > 80, ex. 'BL - 2bac sc PC'). Stocker dans "user_level".
-           - Étape 3: Matières (liste séparée par virgules, valider avec subjects_list, ex. 'Français,Mathématiques,Anglais' ou 'Francais' ou 'athématiques,Anglais'). Stocker dans "user_subjects" et "subjects".
-           - Étape 4: Notes (optionnelles, nombres doivent être entre 0 et 20, même longueur que matières ou moins). Stocker dans "grades".
+           - Étape 3: Matières (liste séparée par virgules, valider avec la fonction match_value(), exemple:(Matière1,subjects_list) et match_value(Matière2,subjects_list) , ex. 'Français,Mathématiques,Anglais' ou 'Francais' ou 'athématiques,Anglais'). Stocker dans "user_subjects" et "subjects".
+           - Étape 4: Notes (optionnelles, nombres doivent être entre 0 et 20, même longueur que matières ou moins). Stocker dans "grades" en fonction de l'ordre des notes et des matières déjà fournies.
            - Si données manquantes ou invalides, redemander avec message clair et rester à l'étape actuelle.
         2. **Traitement des notes (étape 4)**:
            - l'utilisateur peut choisir de ne pas donner ses notes , donc on passe à l'étape 5
@@ -615,7 +647,7 @@ def process_with_llm(input_text, step, session_state, lists):
            - Si note < 8 : "D’après vos réponses, un accompagnement individuel semble le plus adapté pour consolider vos bases.Je vous recommande donc des **cours individuels**, entièrement personnalisés selon votre rythme et vos objectifs."
            - Si note ≥ 8 : "Note ([note]). Votre niveau est compatible avec des **cours en groupe**, qui permettent d’apprendre en interaction avec d'autres participants."
            - si aucune note n'est fournie, on doit passer à l'étape 5 sans poser de question avec un message clair et adapté.
-           - à la fin du traitement des notes(si récupération correcte) ,Proposer: "Veuillez choisir le type de cours pour chaque matière ([matières]) : (ex. indiv,groupe ou 'je veux groupe pour toutes les matières')."
+           - à la fin du traitement des notes(si récupération correcte) ,Proposer: "Veuillez choisir le type de cours pour chaque matière ([matières]) ."
            - Passer à l'étape 5.
         3. **Choix groupe/indiv (étape 5)**:
            - Accepter:
@@ -642,10 +674,10 @@ def process_with_llm(input_text, step, session_state, lists):
            - Stocker dans "forfait_selections" comme un dictionnaire {{matière: id_forfait}} (ex. {{"Physique - Chimie": "12677992", "Mathématiques": "12678012"}}).
            - Si indices invalides (ex. hors plage, non numériques), redemander avec liste des forfaits et rester à l'étape 6.
            - À l’étape 7, valider les choix de types de durée (indices valides dans available_types_duree). Stocker dans "type_duree_selections" comme un dictionnaire {{matière: type_duree_id}}.
-        5. **Données manquantes**:
-           - Avant étape 5, vérifier: 'student_name', 'user_level', 'user_subjects', 'matched_subjects'.
-           - Avant étape 6, vérifier: 'matched_subjects', 'available_forfaits'.
-           - Avant étape 10, vérifier: 'student_name', 'user_level', 'user_center','user_subjects', 'user_school', 'selected_forfaits', 'selected_types_duree'.
+        5. **Données manquantes dans 'data'**:
+           - Avant étape 5, vérifier la présence de : 'student_name', 'user_level', 'user_subjects', 'matched_subjects' dans 'data'.
+           - Avant étape 6, vérifier la présence de : 'matched_subjects', 'available_forfaits' dans 'data'.
+           - Avant étape 10, vérifier la présence de : 'student_name', 'user_level', 'user_center','user_subjects', 'user_school', 'selected_forfaits', 'selected_types_duree' dans 'data'.
            - demander Professeurs (on peut accepter liste vide),école (obligatoire) et centre(on peut accepter vide) avant de recommander les groupes.
            - Si données manquantes, revenir à l’étape correspondante avec message clair (ex: centre manquant , veuillez saisir le centre souhaité).
         6. **Retours , modifications et intentions**:
@@ -658,9 +690,12 @@ def process_with_llm(input_text, step, session_state, lists):
            - tu dois gérer les intentions de l'utilisateur (message quelconque , tu le gère ca dépend l'entrée de l'utilisateur) et les retours en fonction de la structure des étapes et des champs requis.
            - Si l'utilisateur dit 'je veux changer le nom de l'étudiant à Ahmed elar', on doit revenir à l'étape 1 et ecraser le champs 'student_name' avec la nouvelle valeur en restant à l'étape actuel puisque le nom n'est pas requis dans aucune étape.
            - Si l'utilisateur dit 'je veux changer le niveau de l'étudiant à 2bac sc PC', on doit revenir à l'étape 2 et ecraser le champs 'user_level' avec la nouvelle valeur en revenant à l'étape de génération des forfaits (on continue le traitement) puisque le niveau est  requis dans cette étape.
-        7. **Réductions**:
+        7. **vérifier l'existence des données avant de les demadner**:
+              - vérifie à chaque étape le Json , si le champs est déjà remplie tu ne pose pas une question relative à ce champs parce qu'elle est déjà remplie, tu passes à la question suivante.
+              - vérifie avant chaque question l'existence de la valeur du champs concerné dans le Json , si elle existe tu ne pose pas la question et tu passes à la question suivante.
+        8. **Réductions**:
            -pour l'instant ignore ces intructions liés aux réductions parce qu'elles sont génrées manuellement "À l’étape 13 ou aprés l'étape des frais d'inscription il faut poser une question en demandant des commentaires,si vous détectez 'réduction', 'remise', 'rabais' (score > 90) et passer à l’étape 14 , si rien n'est détecter on passe directement à l'étape 14 ".
-        8. **Réponse JSON**:
+        9. **Réponse JSON**:
            - Format:
              ```json
              {{
@@ -673,10 +708,10 @@ def process_with_llm(input_text, step, session_state, lists):
              }}
              ```
            - Inclure données validées dans 'data' (ex. {{"forfait_selections": {{"Physique - Chimie": "12677992", "Mathématiques": "12678012"}}}}).
-           -analyse bine l'entrée de l'utilisateur et le contexte avant de générer la réponse JSON.
+           - analyse bien l'entrée de l'utilisateur et le contexte avant de générer la réponse JSON.
            - permet de gérer les retours et les modifications de l'utilisateur.
            - permet de gérer les intentions de l'utilisateur (message quelconque , tu le gère ca dépend l'entrée de l'utilisateur).
-           - Fournir un message naturel et amical , adapté au nom de l’étudiant (pas la peine de le mentionner dans toutes les étapes).
+           - Fournir un message naturel,amical et adapté au nom de l’étudiant (pas la peine de le mentionner dans toutes les étapes).
            - Si erreur, inclure dans "error" et rester à l'étape actuelle.
 
         **Étapes et attentes**:
@@ -692,32 +727,34 @@ def process_with_llm(input_text, step, session_state, lists):
         10. Centre: Valider avec centers_list ou vide → stocke dans "user_center".
         11. Groupes: Indices valides dans "all_groups_for_selection" → "group_selections" avec vérification de présence de tous les attributs qui sont requis avant cette étape.
         12. Frais: 'Oui'/'Non' → "include_fees".
-        13. ignore cette partie des Commentaires (c'est géré manuellement maintenant): Détecter 'réduction' ou 'avec 10%' → "comments","reduction_percentage" et on ne demande pas le pourcentage dans l'étape 13 , on passe au calcul directement.
-        14. ignore cette partie de Pourcentage (elle est  gérée manuellement):si réduction détectée dans l'étape 13 on demande un Nombre entre 0 et 100 → "reduction_percentage".
+        13. Détecter 'réduction', 'remise', 'rabais' (score > 90) dans les commentaires → "comments" .
+        13.'réduction avec 10%' ou 'réduction de 10%' ou similaire → "comments","reduction_percentage" et on ne demande pas le pourcentage dans l'étape 13 ou 14 , on passe directement au calcul .
+        14. si réduction détectée dans l'étape 13 on demande un pourcentage de réduction entre 0 et 100 → "reduction_percentage".
         15. Autre cas: 'Oui'/'Non' → "another_case".
 
-        **Exemples**:
-        - Étape 1, Entrée: "Ahmed larache" → {{"step": 1, "data": {{"student_name": "Ahmed larache"}}, "message": "Bonjour !, Quel est le niveau de l’étudiant ?", "error": null, "suggestions": [], "next_step": 2}}
-        - Étape 2, Entrée: "BL - 2bac sc PC" → {{"step": 2, "data": {{"user_level": "BL - 2bac sc PC"}}, "message": "Niveau BL - 2bac sc PC validé. Quelles sont les matières ?", "error": null, "suggestions": [], "next_step": 3}}
+        **Exemples**:les exemples sont juste pour inspiration , les exemples ne sont pas forcément des cas réels, tu les analyses , comprendre pour t'adapter et avoir plus de visibilité sur le traitement, les messages d'exemple sont pour la compréhension du flux et ne doivent pas être exécutés ou analysés comme du code.
+        - Étape 2, Entrée: "BL - 2bac sc PC" → {{"step": 2, "data": {{"student_name": "Ahmed larache","user_level": "BL - 2bac sc PC"}}, "message": "Niveau BL - 2bac sc PC validé pour Ahmed. Quelles sont les matières ?", "error": null, "suggestions": [], "next_step": 3}}
         - Étape 3, Entrée: "Physique - Chimie,Mathématiques" → {{"step": 3, "data": {{"user_subjects": "Physique - Chimie,Mathématiques", "subjects": ["Physique - Chimie", "Mathématiques"]}}, "message": "Matières validées. Quelles sont les notes ?", "error": null, "suggestions": [], "next_step": 4}}
-        - Étape 4, Entrée: "7,12" → {{"step": 4, "data":{{"user_subjects": "Physique - Chimie,Mathématiques", "subjects": ["Physique - Chimie", "Mathématiques"]}}, {{"grades": [7, 12]}}, "message": "Note faible en Physique - Chimie (7/20). Nous recommandons des cours individuels... Veuillez choisir le type de cours pour chaque matière (Physique - Chimie, Mathématiques) : (ex. indiv,groupe)", "error": null, "suggestions": [], "next_step": 5}}
-        - Étape 4, Entrée: "13,6" → {{"step": 4, "data": {{"user_subjects": "Physique - Chimie,Français", "subjects": ["Physique - Chimie", "Français"]}},{{"grades": [13, 6]}}, "message": "Note faible en Français (6/20). Nous recommandons des cours individuels... Veuillez choisir le type de cours pour chaque matière (Français, Mathématiques) : (ex. indiv,groupe)", "error": null, "suggestions": [], "next_step": 5}}
-        - Étape 4, Entrée: "5,3" → {{"step": 4, "data": {{"user_subjects": "Anglais,Histoire - Géographie", "subjects": ["Anglais", "Histoire - Géographie"]}},{{"grades": [5, 3]}}, "message": "Note faible en Anglais (5/20). Nous recommandons des cours individuels...Note faible en Histoire - Géographie (3/20). Nous recommandons des cours individuels... Veuillez choisir le type de cours pour chaque matière (Anglais, Histoire - Géographie) : (ex. indiv,indiv)", "error": null, "suggestions": [], "next_step": 5}}
-        - Étape 4, Entrée: "12,15" → {{"step": 4, "data": {{"user_subjects": "Mathématiques,Physique - Chimie", "subjects": ["Mathématiques","Physique - Chimie"]}},{{"grades": [12, 15]}}, "message": "bravo pour les notes obtenues !,Nous recommandons des cours individuels pour les deux matières pour un enseignement personnalisé... Veuillez choisir le type de cours pour chaque matière (Physique - Chimie, Mathématiques) : (ex. indiv,groupe)", "error": null, "suggestions": [], "next_step": 5}}
+        - Étape 4, Entrée: "7,12" → {{"step": 4, "data":{{"user_subjects": "Physique - Chimie,Mathématiques", "subjects": ["Physique - Chimie", "Mathématiques"]}}, {{"grades": [7, 12]}}, "message": "Note faible en Physique - Chimie (7/20). Nous recommandons des cours individuels..., en recommandant des cours en groupe pour une meilleur éxpérience en Mathématiques , Veuillez choisir le type de cours pour chaque matière (Physique - Chimie, Mathématiques) , "error": null, "suggestions": [], "next_step": 5}}
+        - Étape 4, Entrée: "13,6" → {{"step": 4, "data": {{"user_subjects": "Physique - Chimie,Français", "subjects": ["Physique - Chimie", "Français"]}},{{"grades": [13, 6]}}, "message": :"Note faible en Français (6/20). Nous recommandons des cours individuels..., en recommandant des cours en groupe pour une meilleur éxpérience en Physique - Chimie, Veuillez choisir le type de cours pour chaque matière (Français, Mathématiques)", "error": null, "suggestions": [], "next_step": 5}}
+        - Étape 4, Entrée: "5,3" → {{"step": 4, "data": {{"user_subjects": "Anglais,Histoire - Géographie", "subjects": ["Anglais", "Histoire - Géographie"]}},{{"grades": [5, 3]}}, "message": "Note faible en Anglais (5/20) et en Histoire - Géographie (3/20) . Nous recommandons des cours individuels... Veuillez choisir le type de cours pour chaque matière (Anglais, Histoire - Géographie) ", "error": null, "suggestions": [], "next_step": 5}}
+        - Étape 4, Entrée: "12,15" → {{"step": 4, "data": {{"user_subjects": "Mathématiques,Physique - Chimie", "subjects": ["Mathématiques","Physique - Chimie"]}},{{"grades": [12, 15]}}, "message": "bravo pour les notes obtenues !,Nous recommandons des cours individuels pour les deux matières pour un enseignement personnalisé... Veuillez choisir le type de cours pour chaque matière (Physique - Chimie, Mathématiques) )", "error": null, "suggestions": [], "next_step": 5}}
         - Étape 5, Entrée: "groupe,groupe" → {{"step": 5, "data":{{"user_subjects": "Physique - Chimie,Mathématiques", "subjects": ["Physique - Chimie", "Mathématiques"]}}, {{"course_choices": ["groupe", "groupe"]}}, "message": "Vous avez choisi des cours en groupe pour Physique - Chimie et Mathématiques. Les forfaits de Physique - Chimie et Mathématiques  seront affichés à l'étape suivante.", "error": null, "suggestions": [], "next_step": 6}}
         - Étape 5, Entrée: "groupe,indiv" → {{"step": 5, "data": {{"user_subjects": "Physique - Chimie,Français", "subjects": ["Physique - Chimie", "Français"]}},{{"course_choices": ["groupe", "indiv"]}}, "message": "Vous avez choisi des cours en indiv pour Français et en groupe pour Physique - Chimie .Les cours de Français seront prêts ASAP , Les forfaits de Physique - Chimie seront affichés à l'étape suivante.", "error": null, "suggestions": [], "next_step": 6}}
         - Étape 5, Entrée: "indiv,groupe" → {{"step": 5, "data": {{"user_subjects": "Français,Mathématiques", "subjects": ["Français", "Mathématiques"]}},{{"course_choices": ["indiv", "groupe"]}}, "message": "Vous avez choisi des cours individuels pour Français et en groupe pour Mathématiques. Les forfaits de Mathématiques seront affichés à l'étape suivante.", "error": null, "suggestions": [], "next_step": 6}}
         - Étape 5, Entrée: "indiv,indiv" → {{"step": 5, "data": {{"user_subjects": "Français,Anglais", "subjects": ["Français", "Anglais"]}},{{"course_choices": ["indiv", "indiv"]}}, "message": "Vous avez choisi des cours individuels pour Français et Anglais. vos cours seront préparés ultérieurement", "error": null, "suggestions": [], "next_step": 15}}
-        
         - Étape 6, Entrée: "1,1", Contexte: matched_subjects=["Physique - Chimie", "Mathématiques"], available_forfaits={{"Physique - Chimie": {{"12677992": {{"name": "BL-2BAC-PHYSIQUE - CHIMIE"}}}}, "Mathématiques": {{"12678012": {{"name": "BL-2BAC-MATHÉMATIQUES"}}}}}} → {{"step": 6, "data": {{"forfait_selections": {{"Physique - Chimie": "12677992", "Mathématiques": "12678012"}}}}, "message": "Forfaits validés. Veuillez choisir le type de durée pour chaque forfait.", "error": null, "suggestions": [], "next_step": 7}}
         - Étape 6, Entrée: "1,2", Contexte: matched_subjects=["Physique - Chimie", "Mathématiques"], available_forfaits={{"Physique - Chimie": {{"12677992": {{}}}}, "Mathématiques": {{"12678012": {{}}}}}} → {{"step": 6, "data": {{}}, "message": "Choix invalides. Veuillez choisir un forfait pour chaque matière (Physique - Chimie, Mathématiques) : <liste>", "error": "Indice 2 invalide pour Mathématiques", "suggestions": [], "next_step": 6}}   
-        - Étape 7, Entrée: "1,1", Contexte: matched_subjects=["Physique - Chimie", "Mathématiques"], available_types_duree={{"Physique - Chimie": {{"1": {{"name": "BL 2bac Période 4"}}, "2": {{"name": "BL 2bac Période 1"}}}}, "Mathématiques": {{"1": {{"name": "BL 2bac Période 4"}}, "2": {{"name": "BL 2bac Période 1"}}}}}} → {{"step": 7, "data": {{"type_duree_selections": {{"Physique - Chimie": "1", "Mathématiques": "1"}}}}, "message": "Types de durée validés. Veuillez entrer le nom du professeur pour chaque matière (Physique - Chimie, Mathématiques) : (ex. 'Professeur A, Professeur B')", "error": null, "suggestions": [], "next_step": 8}}
-        - Étape 8, Entrée: "Professeur A, Professeur B" → {{"step": 8, "data": {{"user_teachers": ["Professeur A", "Professeur B"]}}, "message": "Professeurs validés. Veuillez entrer le nom de l'école.", "error": null, "suggestions": [], "next_step": 9}}
+        - Étape 7, Entrée: "1,1", Contexte: matched_subjects=["Physique - Chimie", "Mathématiques"], available_types_duree={{"Physique - Chimie": {{"1": {{"name": "BL 2bac Période 4"}}, "2": {{"name": "BL 2bac Période 1"}}}}, "Mathématiques": {{"1": {{"name": "BL 2bac Période 4"}}, "2": {{"name": "BL 2bac Période 1"}}}}}} → {{"step": 7, "data": {{"type_duree_selections": {{"Physique - Chimie": "1", "Mathématiques": "1"}}}}, "message": "Types de durée validés. Veuillez entrer le nom du professeur pour chaque matière (Physique - Chimie, Mathématiques) ", "error": null, "suggestions": [], "next_step": 8}}
+        - Étape 8, Entrée: "Fathia Laihemdi,Fekkak Alilou" → {{"step": 8, "data": {{"user_teachers": ["Fathia Laihemdi", "Fekkak Alilou"]}}, "message": "Professeurs validés. Veuillez entrer le nom de l'école.", "error": null, "suggestions": [], "next_step": 9}}
+        - Étape 8, Entrée: "Fathia Laihemdi pour Mathématique et Fekkak Alilou pour Physique - Chimie" , Contexte: matched_subjects=["Physique - Chimie", "Mathématiques"] → {{"step": 8, "data": {{"user_teachers": ["Fekkak Alilou","Fathia Laihemdi"]}}, "message": "Professeurs validés. Veuillez entrer le nom de l'école.", "error": null, "suggestions": [], "next_step": 9}}
         - Étape 9, Entrée: "École lyautey" → {{"step": 9, "data": {{"user_school": "École A"}}, "message": "École validée. Veuillez entrer le nom du centre (ou laisser vide).", "error": null, "suggestions": [], "next_step": 10}}
         - Étape 10, Entrée: "Centre franceville" → {{"step": 10, "data": {{"user_center": "Centre A"}}, "message": "Centre validé. Veuillez choisir les groupes pour chaque matière (Physique - Chimie, Mathématiques) : (ex. '1,2')", "error": null, "suggestions": [], "next_step": 11}}
         - Étape 11, Entrée: "1,2", Contexte: matched_subjects=["Physique - Chimie", "Mathématiques"], all_groups_for_selection={{"Physique - Chimie": {{"1": {{"name": "Groupe 1"}}}}, "Mathématiques": {{"2": {{"name": "Groupe 2"}}}}}} → {{"step": 11, "data": {{"group_selections": ["1", "2"]}}, "message": "Groupes validés. Souhaitez-vous inclure les frais d'inscription ? (Oui/Non)", "error": null, "suggestions": [], "next_step": 12}}
-        
-        tu ignores ces instructions pour l'instant , laisse la partie traitement des étapes 11 jusqu'à la fin au code python pour qu'il la gère manuellement
+        - Étape 13, Entrée: "je veux réduction de 20%" ou similaire → {{"step": 13, "data": {{"comments": "je veux réduction de 20%","reduction_percentage":"20"}}, "message": "Réduction de 20% détectée.", "error": null, "suggestions": [], "next_step": 14}}
+        - Étape 13, Entrée: "je veux une réduction" → {{"step": 13, "data": {{"comments": "je veux une réduction"}}, "message": "Réduction détectée. Veuillez entrer le pourcentage de réduction (0-100).", "error": null, "suggestions": [], "next_step": 14}}
+        - Étape 14, Entrée: "15" → {{"step": 14, "data": {{"reduction_percentage": 15}}, "message": "Réduction de 10% appliquée ?", "error": null, "suggestions": [], "next_step": 15}}
+
         **Instructions pour l’étape 11**:
         1. L’entrée est une liste d’indices séparés par des virgules (ex. "1,2") correspondant aux groupes dans all_groups_for_selection pour chaque matière dans matched_subjects.
         2. Validez chaque indice:
@@ -793,10 +830,21 @@ def process_with_llm(input_text, step, session_state, lists):
 
 # Gestion des étapes avec Gemini
 def handle_input_submission(step, response_text):
+    logger.debug("Test de la methode search_students")
+    sample_students = search_students("Kenza Alami")
+    if not sample_students:
+        print("Aucun étudiant trouvé avec ce nom.")
+    else:
+        print(f"Étudiants trouvés : {len(sample_students)}")
+    for student in sample_students:
+        print(f"infos etudiant : {student}")
+
     logger.debug(f"Traitement de l'étape {step} avec entrée : {response_text}")
     logger.debug(f"État actuel de responses : {st.session_state.responses}")
     logger.debug(f"État actuel de matched_subjects : {st.session_state.matched_subjects}")
-    
+    # Initialisation de la variable expect_input
+    if "expect_input" not in st.session_state:
+        st.session_state.expect_input = True  # Par défaut, on attend une saisie
     lists = {
         "levels_list": levels_list,
         "subjects_list": subjects_list,
@@ -804,12 +852,73 @@ def handle_input_submission(step, response_text):
         "centers_list": centers_list,
         "teachers_list": teachers_list
     }
+        # Étape 1 : Appeler search_students et gérer les résultats
+    potential_students = st.session_state.get("potential_students", [])
+    current_student_index = st.session_state.get("current_student_index", 0)
+    if step == 1 and response_text.strip():
+        student_name = response_text.strip()
+        potential_students = search_students(student_name)
+        st.session_state.potential_students = potential_students
+        st.session_state.current_student_index = 0
+        st.session_state.responses["student_name"] = student_name
+
+        # Ajouter le message de l'utilisateur
+        st.session_state.messages.append((f"<div class='user-message'>{response_text}</div>", False))
+
+        # Gérer les cas en fonction du nombre d'étudiants trouvés
+        if not potential_students:
+            st.session_state.step = 2
+            st.session_state.messages.append(("<div class='bot-message'>Cet étudiant est nouveau. Quel est son niveau ?</div>", True))
+        elif len(potential_students) == 1:
+            st.session_state.step = 16
+            student = potential_students[0]
+            st.session_state.messages.append((f"<div class='bot-message'> 1 Est-ce bien cet étudiant : {student['student_name']} ayant le niveau {student['niveau']} et dans l’école {student['ecole']} ? (Oui/Non)</div>", True))
+        elif len(potential_students) > 1:
+            st.session_state.step = 16
+            student = potential_students[0]
+            st.session_state.messages.append((f"<div class='bot-message'>2 Est-ce bien cet étudiant : {student['student_name']} ayant le niveau {student['niveau']} et dans l’école {student['ecole']} ? (Oui/Non)</div>", True))
+        return  # Ne pas appeler le LLM à cette étape
+
+    # Étape 16 : Gérer la confirmation
+    elif step == 16:
+        # Ajouter le message de l'utilisateur
+        st.session_state.messages.append((f"<div class='user-message'>{response_text}</div>", False))
+
+        if response_text.lower() == "oui":
+            student = potential_students[current_student_index]
+            st.session_state.responses.update({
+                "user_level": student["niveau"],
+                "user_school": student["ecole"]
+            })
+            if student["niveau"] and student["niveau"] != "Inconnu":
+                st.session_state.step = 3
+                st.session_state.messages.append(("<div class='bot-message'>Données enregistrées. Quelles sont les matières ?</div>", True))
+            else:
+                st.session_state.step = 2
+                st.session_state.messages.append(("<div class='bot-message'>Quel est le niveau de l’étudiant ?</div>", True))
+        elif response_text.lower() == "non":
+            if current_student_index + 1 < len(potential_students):
+                st.session_state.step = 16
+                st.session_state.current_student_index += 1
+                student = potential_students[current_student_index]
+                st.session_state.messages.append((f"<div class='bot-message'>Est-ce bien cet étudiant : {student['student_name']} ayant le niveau {student['niveau']} et dans l’école {student['ecole']} ? (Oui/Non)</div>", True))
+            else:
+                st.session_state.step = 2
+                st.session_state.messages.append(("<div class='bot-message'>Aucun autre étudiant correspondant. Quel est le niveau de l’étudiant ?</div>", True))
+        else:
+            st.session_state.step = 16
+            student = potential_students[current_student_index]
+            st.session_state.messages.append((f"<div class='bot-message'>Veuillez répondre par 'Oui' ou 'Non'. Est-ce bien cet étudiant : {student['student_name']} ayant le niveau {student['niveau']} et dans l’école {student['ecole']} ? (Oui/Non)</div>", True))
+        return  # Ne pas appeler le LLM à cette étape
+
     llm_response = process_with_llm(response_text, step, st.session_state, lists)
-    
+
+
     # Mettre à jour l'état
     st.session_state.step = llm_response["next_step"]
     st.session_state.responses.update(llm_response["data"])
     
+    logger.debug(f"État actuel de responses apres mise à jour : {st.session_state.responses}")
     # Ajouter le message de l'utilisateur
     st.session_state.messages.append((f"<div class='user-message'>{response_text}</div>", False))
     
@@ -818,8 +927,21 @@ def handle_input_submission(step, response_text):
     if llm_response["error"]:
         st.session_state.messages.append((f"<div class='bot-message'>Erreur : {llm_response['error']}</div>", True))
     
+    elif llm_response["step"] == 2:
+        logger.debug(f"LLM response step 2 : {llm_response}")
+        st.session_state.responses['user_level'] = response_text
+        #st.session_state.messages.append(("<div class='bot-message'>Quelles sont les matières ?</div>", True))
+        st.session_state.step = 3
+
+    elif llm_response["step"] == 3:
+        logger.debug(f"LLM response step 3 : {llm_response["data"]}")
+        st.session_state.responses['user_subjects'] = response_text
+        #st.session_state.messages.append(("<div class='bot-message'>Quelles sont les notes ?</div>", True))
+        st.session_state.step = 5
+
     # Vérification des préconditions pour l'étape 5
-    if llm_response["step"] == 5 and "course_choices" in llm_response["data"]:
+    elif llm_response["step"] == 5 and "course_choices" in llm_response["data"]:
+        logger.debug(f"Traitement de l'étape 5 avec course_choices : {llm_response}")
         required_fields = ['student_name', 'user_level', 'user_subjects']
         missing_fields = [field for field in required_fields if field not in st.session_state.responses or not st.session_state.responses[field]]
         if missing_fields:
@@ -882,7 +1004,9 @@ def handle_input_submission(step, response_text):
         else:
             st.session_state.messages.append(("<div class='bot-message'>Aucune matière sélectionnée pour des cours en groupe. Voulez-vous traiter un autre cas ? (Oui/Non)</div>", True))
             st.session_state.step = 15
+
     elif llm_response["step"] == 6 and "forfait_selections" in llm_response["data"]:
+        logger.debug(f"LLM response à l'étape 6  : {llm_response}")
         st.session_state.selected_forfaits = llm_response["data"]["forfait_selections"]
         # Validation que selected_forfaits est un dictionnaire
         if not isinstance(st.session_state.selected_forfaits, dict):
@@ -916,47 +1040,50 @@ def handle_input_submission(step, response_text):
         else:
             st.session_state.messages.append(("<div class='bot-message'>Aucun type de durée disponible. Voulez-vous traiter un autre cas ? (Oui/Non)</div>", True))
             st.session_state.step = 15
+
     elif llm_response["step"] == 7 and "type_duree_selections" in llm_response["data"]:
+        logger.debug(f"Traitement de l'étape 7 avec course_choices : {llm_response}")
         st.session_state.selected_types_duree = llm_response["data"]["type_duree_selections"]
 
     # centre et  générations des groupes
     elif llm_response["step"] == 10 and llm_response["next_step"] == 11:
         # Vérifier les données obligatoires
-        required_fields = ['student_name', 'user_level', 'user_subjects', 'user_school']
-        missing_fields = [field for field in required_fields if field not in st.session_state.responses or not st.session_state.responses[field]]
-        if missing_fields or not st.session_state.selected_forfaits or not st.session_state.selected_types_duree:
-            missing_message = "<div class='bot-message'>Données manquantes : "
-            if missing_fields:
-                missing_message += f"{', '.join(missing_fields)}. "
-            if not st.session_state.selected_forfaits:
-                missing_message += "Forfaits non sélectionnés. "
-            if not st.session_state.selected_types_duree:
-                missing_message += "Types de durée non sélectionnés. "
-            missing_message += "Veuillez fournir les informations manquantes.</div>"
-            st.session_state.messages.append((missing_message, True))
-            if 'student_name' in missing_fields:
-                st.session_state.step = 1
-                st.session_state.messages.append(("<div class='bot-message'>Quel est le nom de l'étudiant ?</div>", True))
-            elif 'user_level' in missing_fields:
-                st.session_state.step = 2
-                st.session_state.messages.append(("<div class='bot-message'>Quel est votre niveau (ex. BL - 2bac sc PC) ?</div>", True))
-            elif 'user_subjects' in missing_fields:
-                st.session_state.step = 3
-                st.session_state.messages.append(("<div class='bot-message'>Quelles sont les matières qui intéressent l'étudiant ?</div>", True))
-            elif 'user_school' in missing_fields:
-                st.session_state.step = 9
-                st.session_state.messages.append(("<div class='bot-message'>Quelle est l'école de l'étudiant (obligatoire) ?</div>", True))
-            elif 'user_center' in missing_fields:
-                st.session_state.step = 9
-                st.session_state.messages.append(("<div class='bot-message'>Quel est le centre de l'étudiant (optionnel) ?</div>", True))
-            elif not st.session_state.responses.get('user_teachers'):
-                st.session_state.step = 8
-                st.session_state.messages.append(("<div class='bot-message'>Quels sont les professeurs de l'étudiant (optionnel) ?</div>", True))
-            elif not st.session_state.selected_forfaits:
-                st.session_state.step = 6
-            elif not st.session_state.selected_types_duree:
-                st.session_state.step = 7
-            return
+        logger.debug(f"Réponse LLM pour le début de l'étape 10 : {llm_response}")
+        #required_fields = ['student_name', 'user_level', 'user_subjects', 'user_school']
+        #missing_fields = [field for field in required_fields if field not in st.session_state.responses or not st.session_state.responses[field]]
+        #if missing_fields or not st.session_state.selected_forfaits or not st.session_state.selected_types_duree:
+        #    missing_message = "<div class='bot-message'>Données manquantes : "
+        #    if missing_fields:
+        #        missing_message += f"{', '.join(missing_fields)}. "
+        #    if not st.session_state.selected_forfaits:
+        #        missing_message += "Forfaits non sélectionnés. "
+        #    if not st.session_state.selected_types_duree:
+        #        missing_message += "Types de durée non sélectionnés. "
+        #    missing_message += "Veuillez fournir les informations manquantes.</div>"
+        #    st.session_state.messages.append((missing_message, True))
+        #    if 'student_name' in missing_fields:
+        #        st.session_state.step = 1
+        #        st.session_state.messages.append(("<div class='bot-message'>Quel est le nom de l'étudiant ?</div>", True))
+        #    elif 'user_level' in missing_fields:
+        #        st.session_state.step = 2
+        #        st.session_state.messages.append(("<div class='bot-message'>Quel est votre niveau (ex. BL - 2bac sc PC) ?</div>", True))
+        #    elif 'user_subjects' in missing_fields:
+        #        st.session_state.step = 3
+        #        st.session_state.messages.append(("<div class='bot-message'>Quelles sont les matières qui intéressent l'étudiant ?</div>", True))
+        #    elif 'user_school' in missing_fields:
+        #        st.session_state.step = 9
+        #        st.session_state.messages.append(("<div class='bot-message'>Quelle est l'école de l'étudiant (obligatoire) ?</div>", True))
+        #    elif 'user_center' in missing_fields:
+        #        st.session_state.step = 9
+        #        st.session_state.messages.append(("<div class='bot-message'>Quel est le centre de l'étudiant (optionnel) ?</div>", True))
+        #    elif not st.session_state.responses.get('user_teachers'):
+        #        st.session_state.step = 8
+        #        st.session_state.messages.append(("<div class='bot-message'>Quels sont les professeurs de l'étudiant (optionnel) ?</div>", True))
+        #    elif not st.session_state.selected_forfaits:
+        #        st.session_state.step = 6
+        #    elif not st.session_state.selected_types_duree:
+        #        st.session_state.step = 7
+        #    return
         
         group_subjects = st.session_state.matched_subjects
         with st.spinner("Recherche en cours..."):
@@ -974,6 +1101,7 @@ def handle_input_submission(step, response_text):
         st.session_state.all_recommendations = all_recommendations
         st.session_state.all_groups_for_selection = all_groups_for_selection
         st.session_state.matched_subjects = matched_subjects
+        logger.debug(f"Réponse LLM pour la fin de l'étape 10 : {llm_response}")
         logger.debug(f"Matched subjects 10: {matched_subjects}")
         logger.debug(f"all_groups_for_selection at end of step 10: {st.session_state.all_groups_for_selection}")
         for msg in output:
@@ -1192,18 +1320,21 @@ def handle_input_submission(step, response_text):
             st.session_state.step = 12
 
     elif llm_response["step"] == 13:
-        #st.session_state.messages.append((f"<div class='user-message'>{response_text}</div>", False))
         st.session_state.responses['commentaires'] = response_text.strip()
-
+    
         reduction_keywords = ['réduction', 'reduction', 'remise', 'rabais', 'discount']
         response_lower = response_text.strip().lower()
         reduction_detected = any(keyword in response_lower for keyword in reduction_keywords)
-
-        if reduction_detected:
-            st.session_state.messages.append(("<div class='bot-message'>Quel est le pourcentage de réduction que vous souhaitez appliquer ? (Entre 0 et 100)</div>", True))
-            st.session_state.step = 14
+        print(f"Réduction détectée : {llm_response['data'].get('reduction_percentage', None)}")
+        if reduction_detected :
+            if llm_response["data"].get("reduction_percentage", None) is not None :
+                print(f"Pourcentage de Réduction détecté : {llm_response['data'].get('reduction_percentage', None)}")
+                st.session_state.reduction_percentage = llm_response["data"].get("reduction_percentage", None)
+                st.session_state.expect_input = False  # Pas d'input à l'étape 14
+                st.session_state.step = 14
+            else :
+                st.session_state.step = 14
         else:
-
             total_message = f"<div class='bot-message'>Total final : {st.session_state.total_with_frais:.2f} DH</div>"
             st.session_state.messages.append((total_message, True))
             st.session_state.messages.append(("<div class='bot-message'>Voulez-vous traiter un autre cas ? (Oui/Non)</div>", True))
@@ -1211,8 +1342,15 @@ def handle_input_submission(step, response_text):
 
     elif llm_response["step"] == 14:
         try:
-            percentage = float(response.strip())
+            if st.session_state.expect_input :
+                percentage = float(response.strip())
+                print(f"Pourcentage de réduction étape 14 ,TRUE : {percentage}")
+            else :
+                percentage = st.session_state.reduction_percentage
+                print(f"Pourcentage de réduction étape 14 , FALSE : {percentage}")
+                st.session_state.expect_input = True   
             if 0 <= percentage <= 100:
+                print(f"Pourcentage de réduction étape 14  0<x>100: {percentage}")
                 #st.session_state.messages.append((f"<div class='user-message'>{response}</div>", False))
                 st.session_state.reduction_percentage = percentage
                 total_base = st.session_state.total_with_frais
@@ -1235,6 +1373,18 @@ def handle_input_submission(step, response_text):
     elif llm_response["step"] == 15:
         choice = response_text.strip().lower()
         if choice in ['oui', 'yes']:
+            # Sauvegarder la discussion actuelle
+            session_id = f"session_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+            history_entry = {
+                "id": session_id,
+                "student_name": st.session_state.responses.get("student_name", "Inconnu"),
+                "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M"),
+                "messages": st.session_state.messages.copy(),
+                "responses": st.session_state.responses.copy()
+            }
+            if "chat_history" not in st.session_state:
+                st.session_state.chat_history = {}
+            st.session_state.chat_history[session_id] = history_entry
             #st.session_state.messages.append((f"<div class='user-message'>{response_text}</div>", False))
             st.session_state.messages.append(("<div class='bot-message'>D'accord, commençons un nouveau cas. Quelles matières souhaitez-vous étudier ?</div>", True))
             st.session_state.step = 1
@@ -1255,6 +1405,18 @@ def handle_input_submission(step, response_text):
             st.session_state.selected_types_duree = {}
             st.session_state.available_forfaits = {}
         elif choice in ['non', 'no']:
+            # Sauvegarder la discussion actuelle
+            session_id = f"session_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+            history_entry = {
+                "id": session_id,
+                "student_name": st.session_state.responses.get("student_name", "Inconnu"),
+                "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M"),
+                "messages": st.session_state.messages.copy(),
+                "responses": st.session_state.responses.copy()
+            }
+            if "chat_history" not in st.session_state:
+                st.session_state.chat_history = {}
+            st.session_state.chat_history[session_id] = history_entry
             #st.session_state.messages.append((f"<div class='user-message'>{response_text}</div>", False))
             st.session_state.messages.append(("<div class='bot-message'>Merci pour votre interaction. À bientôt !</div>", True))
             st.session_state.step = 0
@@ -1276,8 +1438,30 @@ with st.sidebar:
     st.markdown("<div class='profile-name'>ELARACHE Jalal</div>", unsafe_allow_html=True)
     st.header("Options")
     st.write("Bienvenue dans le Chatbot de Recommandation !")
-    st.write("Utilisez ce chatbot pour trouver des groupes adaptés à vos besoins.")
+    if "chat_history" in st.session_state and st.session_state.chat_history:
+        st.sidebar.markdown("<h4 style='color: white;'>Historique des discussions</h4>", unsafe_allow_html=True)
+        for session_id, entry in st.session_state.chat_history.items():
+            st.sidebar.markdown(
+                f"<div class='history-item' onclick='javascript:window.parent.postMessage({{type: \"load_chat\", session_id: \"{session_id}\"}}, \"*\");'>"
+                f"{entry['student_name']} - {entry['timestamp']}</div>",
+                unsafe_allow_html=True
+            )
+    else:
+        st.sidebar.markdown("<div style='color: white;'>Aucun historique disponible.</div>", unsafe_allow_html=True)
     if st.button("Réinitialiser la conversation"):
+        # Sauvegarder la discussion actuelle avant réinitialisation
+        if st.session_state.messages:
+            session_id = f"session_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+            history_entry = {
+                "id": session_id,
+                "student_name": st.session_state.responses.get("student_name", "Inconnu"),
+                "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M"),
+                "messages": st.session_state.messages.copy(),
+                "responses": st.session_state.responses.copy()
+            }
+            if "chat_history" not in st.session_state:
+                st.session_state.chat_history = {}
+            st.session_state.chat_history[session_id] = history_entry
         st.session_state.clear()
         st.session_state.step = 0
         st.session_state.messages = [("<div class='bot-message'>Bonjour ! Je vais vous aider à trouver des groupes recommandés.</div>", True)]
@@ -1352,6 +1536,7 @@ questions = [
 
 placeholders = [
     "Ex: Ahmed larache",
+    "Ex: Oui ou Non",
     f"Ex: {', '.join(levels_list[:3]) if levels_list else 'BL - 2bac sc PC'}",
     f"Ex: {', '.join(subjects_list[:3]) if subjects_list else 'Français, Mathématiques'}",
     "Ex: 12, 15 (ou laissez vide)",
@@ -1377,18 +1562,61 @@ if st.session_state.step == 0:
     st.session_state.input_counter = 0
     st.rerun()
 
-elif st.session_state.step in range(1, 16):
-    input_key = f"input_step_{st.session_state.step}_{st.session_state.input_counter}"
-    response = st.text_input("Votre réponse :", key=input_key, placeholder=placeholders[st.session_state.step - 1])
-    
-    if input_key in st.session_state:
-        if st.session_state[input_key] != st.session_state.current_input:
-            st.session_state.current_input = st.session_state[input_key]
-            st.session_state.submitted = True
+    # Modification de la logique pour afficher ou non le champ de saisie
+# Modification du bloc principal pour gérer les cas où expect_input est False
+elif st.session_state.step in range(1, 17):
+    if st.session_state.expect_input:  # Afficher le champ de saisie seulement si expect_input est True
+        input_key = f"input_step_{st.session_state.step}_{st.session_state.input_counter}"
+        response = st.text_input("Votre réponse :", key=input_key, placeholder=placeholders[st.session_state.step - 1])
+        
+        if input_key in st.session_state:
+            if st.session_state[input_key] != st.session_state.current_input:
+                st.session_state.current_input = st.session_state[input_key]
+                st.session_state.submitted = True
 
-    if st.session_state.submitted:
-        handle_input_submission(st.session_state.step, st.session_state[input_key])
-        st.session_state.input_counter += 1
-        st.session_state.current_input = ""
-        st.session_state.submitted = False
+        if st.session_state.submitted:
+            handle_input_submission(st.session_state.step, st.session_state[input_key])
+            st.session_state.input_counter += 1
+            st.session_state.current_input = ""
+            st.session_state.submitted = False
+            st.rerun()
+    else:
+        # Si expect_input est False, traiter l'étape automatiquement
+        handle_input_submission(st.session_state.step, "")  # Passer une réponse vide
+        st.session_state.expect_input = True  # Réactiver l'input pour l'étape suivante
         st.rerun()
+    # Si expect_input est False, on n'affiche rien (pas de champ de saisie)
+
+# Ajout du script JavaScript pour gérer le chargement de l'historique
+st.markdown("""
+    <script>
+    window.addEventListener('message', (event) => {
+        if (event.data.type === 'load_chat' && event.data.session_id) {
+            const sessionId = event.data.session_id;
+            fetch(`/load_chat?session_id=${sessionId}`)
+                .then(response => response.json())
+                .then(data => {
+                    if (data.messages) {
+                        // Réinitialiser la conversation actuelle
+                        window.parent.postMessage({type: 'clear_chat'}, '*');
+                        // Charger les messages de l'historique
+                        data.messages.forEach(msg => {
+                            window.parent.postMessage({type: 'add_message', content: msg[0], isBot: msg[1]}, '*');
+                        });
+                        // Restaurer les réponses et l'étape
+                        window.parent.postMessage({type: 'set_responses', responses: data.responses}, '*');
+                        window.parent.postMessage({type: 'set_step', step: 15}, '*');
+                    }
+                })
+                .catch(error => console.error('Erreur lors du chargement de la discussion:', error));
+        }
+    });
+    </script>
+""", unsafe_allow_html=True)
+
+# Fonction pour charger une discussion (déjà présente, mais incluse ici pour cohérence)
+@st.cache_resource
+def load_chat(session_id):
+    if "chat_history" in st.session_state and session_id in st.session_state.chat_history:
+        return st.session_state.chat_history[session_id]
+    return {"messages": [], "responses": {}}

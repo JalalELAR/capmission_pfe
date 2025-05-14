@@ -39,8 +39,12 @@ collection_groupes = client.get_collection(name="groupes_vectorises9")
 collection_seances = client.get_or_create_collection(name="seances_vectorises")
 collection_combinaisons = client.get_or_create_collection(name="combinaisons_vectorises")
 collection_students = client.get_or_create_collection(name="students_vectorises")
+collection_niveaux = client.get_or_create_collection(name="niveaux")
+resultats = collection_niveaux.get() 
+metadatas = resultats['metadatas']  # liste de dicts, ex: [{"niveau": "Primaire"}, {"niveau": "Secondaire"}, ...]
+# Extraire les valeurs du champ "niveau"
+niveaux = [meta["niveau"] for meta in metadatas if "niveau" in meta]
 
-# Définition de la structure attendue pour un groupe
 GROUP_STRUCTURE = {
     "id_cours": str,
     "name_cours": str,
@@ -99,14 +103,12 @@ model = load_model()
 
 # Récupérer les valeurs uniques depuis ChromaDB
 schools = set()
-levels = set()
 subjects = set()
 centers = set()
 teachers = set()
 for metadata in all_groups['metadatas']:
     try:
         schools.add(metadata['ecole'].split(", ")[0])
-        levels.add(metadata['niveau'])
         subjects.add(metadata['matiere'])
         centers.add(metadata['centre'])
         teachers.add(metadata['teacher'])
@@ -114,7 +116,7 @@ for metadata in all_groups['metadatas']:
         continue
 
 schools_list = sorted(list(schools))
-levels_list = sorted(list(levels))
+levels_list = sorted(list(niveaux))
 subjects_list = sorted(list(subjects))
 centers_list = sorted(list(centers))
 teachers_list = sorted(list(teachers))
@@ -328,7 +330,7 @@ def get_recommendations(student_name, user_level, user_subjects, user_teachers, 
     all_groups_for_selection = {}
 
     # Match inputs
-    matched_level = match_value(user_level, levels)[0]
+    matched_level = match_value(user_level, niveaux)[0]
     matched_subjects = [match_value(subj.strip(), subjects)[0] for subj in user_subjects.split(",")]
     
     # Handle user_teachers as string, list, or None
@@ -577,7 +579,33 @@ st.markdown("""
 # Initialisation de la variable expect_input
 if "expect_input" not in st.session_state:
     st.session_state.expect_input = True  # Par défaut, on attend une saisie
-    
+
+def search_students(student_name):
+    """Récupère une liste d'étudiants correspondant exactement au nom dans la collection vectorisée."""
+    try:
+        # Recherche exacte dans la collection avec le nom comme query_text
+        results = collection_students.query(
+            query_texts=[student_name],
+            n_results=10,  # Limite à 10 résultats pour gérer les homonymes
+            where={"student_name": student_name}  # Filtre exact sur le nom
+        )
+        if results["ids"] and results["ids"][0]:
+            # Extraire les métadatas pour chaque étudiant trouvé
+            students = [
+                {
+                    "id": id,
+                    "student_name": metadata["student_name"],
+                    "niveau": metadata["niveau"],
+                    "ecole": metadata["ecole"]
+                }
+                for id, metadata in zip(results["ids"][0], results["metadatas"][0])
+            ]
+            return students
+        return []
+    except Exception as e:
+        logger.error(f"Erreur lors de la recherche des étudiants : {e}")
+        return []
+
 # Fonction de traitement avec Gemini
 def process_with_llm(input_text, step, session_state, lists):
     try:
@@ -604,10 +632,10 @@ def process_with_llm(input_text, step, session_state, lists):
         **Instructions**:
          - Process the user input and context below to generate a JSON response. The examples are reference text to understand the conversation flow and should not be executed or parsed as code.
         1. **Collecte stricte des informations**:
-           - Étape 1: Nom complet (non vide, vérifier dans collection_students). Stocker dans "student_name".
+           - Étape 1 et 16: Ces étapes sont gérées par le code Python. Ne générez pas de messages pour ces étapes.
            - Étape 2: Niveau (valider avec levels_list, score > 80, ex. 'BL - 2bac sc PC'). Stocker dans "user_level".
-           - Étape 3: Matières (liste séparée par virgules, valider avec subjects_list, ex. 'Français,Mathématiques,Anglais' ou 'Francais' ou 'athématiques,Anglais'). Stocker dans "user_subjects" et "subjects".
-           - Étape 4: Notes (optionnelles, nombres doivent être entre 0 et 20, même longueur que matières ou moins). Stocker dans "grades".
+           - Étape 3: Matières (liste séparée par virgules, valider avec la fonction match_value(), exemple:(Matière1,subjects_list) et match_value(Matière2,subjects_list) , ex. 'Français,Mathématiques,Anglais' ou 'Francais' ou 'athématiques,Anglais'). Stocker dans "user_subjects" et "subjects".
+           - Étape 4: Notes (optionnelles, nombres doivent être entre 0 et 20, même longueur que matières ou moins). Stocker dans "grades" en fonction de l'ordre des notes et des matières déjà fournies.
            - Si données manquantes ou invalides, redemander avec message clair et rester à l'étape actuelle.
         2. **Traitement des notes (étape 4)**:
            - l'utilisateur peut choisir de ne pas donner ses notes , donc on passe à l'étape 5
@@ -646,10 +674,10 @@ def process_with_llm(input_text, step, session_state, lists):
            - Stocker dans "forfait_selections" comme un dictionnaire {{matière: id_forfait}} (ex. {{"Physique - Chimie": "12677992", "Mathématiques": "12678012"}}).
            - Si indices invalides (ex. hors plage, non numériques), redemander avec liste des forfaits et rester à l'étape 6.
            - À l’étape 7, valider les choix de types de durée (indices valides dans available_types_duree). Stocker dans "type_duree_selections" comme un dictionnaire {{matière: type_duree_id}}.
-        5. **Données manquantes**:
-           - Avant étape 5, vérifier: 'student_name', 'user_level', 'user_subjects', 'matched_subjects'.
-           - Avant étape 6, vérifier: 'matched_subjects', 'available_forfaits'.
-           - Avant étape 10, vérifier: 'student_name', 'user_level', 'user_center','user_subjects', 'user_school', 'selected_forfaits', 'selected_types_duree'.
+        5. **Données manquantes dans 'data'**:
+           - Avant étape 5, vérifier la présence de : 'student_name', 'user_level', 'user_subjects', 'matched_subjects' dans 'data'.
+           - Avant étape 6, vérifier la présence de : 'matched_subjects', 'available_forfaits' dans 'data'.
+           - Avant étape 10, vérifier la présence de : 'student_name', 'user_level', 'user_center','user_subjects', 'user_school', 'selected_forfaits', 'selected_types_duree' dans 'data'.
            - demander Professeurs (on peut accepter liste vide),école (obligatoire) et centre(on peut accepter vide) avant de recommander les groupes.
            - Si données manquantes, revenir à l’étape correspondante avec message clair (ex: centre manquant , veuillez saisir le centre souhaité).
         6. **Retours , modifications et intentions**:
@@ -704,9 +732,8 @@ def process_with_llm(input_text, step, session_state, lists):
         14. si réduction détectée dans l'étape 13 on demande un pourcentage de réduction entre 0 et 100 → "reduction_percentage".
         15. Autre cas: 'Oui'/'Non' → "another_case".
 
-        **Exemples**: les messages d'exemple sont pour la compréhension du flux et ne doivent pas être exécutés ou analysés comme du code.
-        - Étape 1, Entrée: "Ahmed larache" → {{"step": 1, "data": {{"student_name": "Ahmed larache"}}, "message": "Bonjour !, Quel est le niveau de l’étudiant ?", "error": null, "suggestions": [], "next_step": 2}}
-        - Étape 2, Entrée: "BL - 2bac sc PC" → {{"step": 2, "data": {{"user_level": "BL - 2bac sc PC"}}, "message": "Niveau BL - 2bac sc PC validé. Quelles sont les matières ?", "error": null, "suggestions": [], "next_step": 3}}
+        **Exemples**:les exemples sont juste pour inspiration , les exemples ne sont pas forcément des cas réels, tu les analyses , comprendre pour t'adapter et avoir plus de visibilité sur le traitement, les messages d'exemple sont pour la compréhension du flux et ne doivent pas être exécutés ou analysés comme du code.
+        - Étape 2, Entrée: "BL - 2bac sc PC" → {{"step": 2, "data": {{"student_name": "Ahmed larache","user_level": "BL - 2bac sc PC"}}, "message": "Niveau BL - 2bac sc PC validé pour Ahmed. Quelles sont les matières ?", "error": null, "suggestions": [], "next_step": 3}}
         - Étape 3, Entrée: "Physique - Chimie,Mathématiques" → {{"step": 3, "data": {{"user_subjects": "Physique - Chimie,Mathématiques", "subjects": ["Physique - Chimie", "Mathématiques"]}}, "message": "Matières validées. Quelles sont les notes ?", "error": null, "suggestions": [], "next_step": 4}}
         - Étape 4, Entrée: "7,12" → {{"step": 4, "data":{{"user_subjects": "Physique - Chimie,Mathématiques", "subjects": ["Physique - Chimie", "Mathématiques"]}}, {{"grades": [7, 12]}}, "message": "Note faible en Physique - Chimie (7/20). Nous recommandons des cours individuels..., en recommandant des cours en groupe pour une meilleur éxpérience en Mathématiques , Veuillez choisir le type de cours pour chaque matière (Physique - Chimie, Mathématiques) , "error": null, "suggestions": [], "next_step": 5}}
         - Étape 4, Entrée: "13,6" → {{"step": 4, "data": {{"user_subjects": "Physique - Chimie,Français", "subjects": ["Physique - Chimie", "Français"]}},{{"grades": [13, 6]}}, "message": :"Note faible en Français (6/20). Nous recommandons des cours individuels..., en recommandant des cours en groupe pour une meilleur éxpérience en Physique - Chimie, Veuillez choisir le type de cours pour chaque matière (Français, Mathématiques)", "error": null, "suggestions": [], "next_step": 5}}
@@ -803,6 +830,15 @@ def process_with_llm(input_text, step, session_state, lists):
 
 # Gestion des étapes avec Gemini
 def handle_input_submission(step, response_text):
+    logger.debug("Test de la methode search_students")
+    sample_students = search_students("Kenza Alami")
+    if not sample_students:
+        print("Aucun étudiant trouvé avec ce nom.")
+    else:
+        print(f"Étudiants trouvés : {len(sample_students)}")
+    for student in sample_students:
+        print(f"infos etudiant : {student}")
+
     logger.debug(f"Traitement de l'étape {step} avec entrée : {response_text}")
     logger.debug(f"État actuel de responses : {st.session_state.responses}")
     logger.debug(f"État actuel de matched_subjects : {st.session_state.matched_subjects}")
@@ -816,12 +852,73 @@ def handle_input_submission(step, response_text):
         "centers_list": centers_list,
         "teachers_list": teachers_list
     }
+        # Étape 1 : Appeler search_students et gérer les résultats
+    potential_students = st.session_state.get("potential_students", [])
+    current_student_index = st.session_state.get("current_student_index", 0)
+    if step == 1 and response_text.strip():
+        student_name = response_text.strip()
+        potential_students = search_students(student_name)
+        st.session_state.potential_students = potential_students
+        st.session_state.current_student_index = 0
+        st.session_state.responses["student_name"] = student_name
+
+        # Ajouter le message de l'utilisateur
+        st.session_state.messages.append((f"<div class='user-message'>{response_text}</div>", False))
+
+        # Gérer les cas en fonction du nombre d'étudiants trouvés
+        if not potential_students:
+            st.session_state.step = 2
+            st.session_state.messages.append(("<div class='bot-message'>Cet étudiant est nouveau. Quel est son niveau ?</div>", True))
+        elif len(potential_students) == 1:
+            st.session_state.step = 16
+            student = potential_students[0]
+            st.session_state.messages.append((f"<div class='bot-message'> 1 Est-ce bien cet étudiant : {student['student_name']} ayant le niveau {student['niveau']} et dans l’école {student['ecole']} ? (Oui/Non)</div>", True))
+        elif len(potential_students) > 1:
+            st.session_state.step = 16
+            student = potential_students[0]
+            st.session_state.messages.append((f"<div class='bot-message'>2 Est-ce bien cet étudiant : {student['student_name']} ayant le niveau {student['niveau']} et dans l’école {student['ecole']} ? (Oui/Non)</div>", True))
+        return  # Ne pas appeler le LLM à cette étape
+
+    # Étape 16 : Gérer la confirmation
+    elif step == 16:
+        # Ajouter le message de l'utilisateur
+        st.session_state.messages.append((f"<div class='user-message'>{response_text}</div>", False))
+
+        if response_text.lower() == "oui":
+            student = potential_students[current_student_index]
+            st.session_state.responses.update({
+                "user_level": student["niveau"],
+                "user_school": student["ecole"]
+            })
+            if student["niveau"] and student["niveau"] != "Inconnu":
+                st.session_state.step = 3
+                st.session_state.messages.append(("<div class='bot-message'>Données enregistrées. Quelles sont les matières ?</div>", True))
+            else:
+                st.session_state.step = 2
+                st.session_state.messages.append(("<div class='bot-message'>Quel est le niveau de l’étudiant ?</div>", True))
+        elif response_text.lower() == "non":
+            if current_student_index + 1 < len(potential_students):
+                st.session_state.step = 16
+                st.session_state.current_student_index += 1
+                student = potential_students[current_student_index]
+                st.session_state.messages.append((f"<div class='bot-message'>Est-ce bien cet étudiant : {student['student_name']} ayant le niveau {student['niveau']} et dans l’école {student['ecole']} ? (Oui/Non)</div>", True))
+            else:
+                st.session_state.step = 2
+                st.session_state.messages.append(("<div class='bot-message'>Aucun autre étudiant correspondant. Quel est le niveau de l’étudiant ?</div>", True))
+        else:
+            st.session_state.step = 16
+            student = potential_students[current_student_index]
+            st.session_state.messages.append((f"<div class='bot-message'>Veuillez répondre par 'Oui' ou 'Non'. Est-ce bien cet étudiant : {student['student_name']} ayant le niveau {student['niveau']} et dans l’école {student['ecole']} ? (Oui/Non)</div>", True))
+        return  # Ne pas appeler le LLM à cette étape
+
     llm_response = process_with_llm(response_text, step, st.session_state, lists)
-    
+
+
     # Mettre à jour l'état
     st.session_state.step = llm_response["next_step"]
     st.session_state.responses.update(llm_response["data"])
     
+    logger.debug(f"État actuel de responses apres mise à jour : {st.session_state.responses}")
     # Ajouter le message de l'utilisateur
     st.session_state.messages.append((f"<div class='user-message'>{response_text}</div>", False))
     
@@ -830,8 +927,21 @@ def handle_input_submission(step, response_text):
     if llm_response["error"]:
         st.session_state.messages.append((f"<div class='bot-message'>Erreur : {llm_response['error']}</div>", True))
     
+    elif llm_response["step"] == 2:
+        logger.debug(f"LLM response step 2 : {llm_response}")
+        st.session_state.responses['user_level'] = response_text
+        #st.session_state.messages.append(("<div class='bot-message'>Quelles sont les matières ?</div>", True))
+        st.session_state.step = 3
+
+    elif llm_response["step"] == 3:
+        logger.debug(f"LLM response step 3 : {llm_response["data"]}")
+        st.session_state.responses['user_subjects'] = response_text
+        #st.session_state.messages.append(("<div class='bot-message'>Quelles sont les notes ?</div>", True))
+        st.session_state.step = 5
+
     # Vérification des préconditions pour l'étape 5
-    if llm_response["step"] == 5 and "course_choices" in llm_response["data"]:
+    elif llm_response["step"] == 5 and "course_choices" in llm_response["data"]:
+        logger.debug(f"Traitement de l'étape 5 avec course_choices : {llm_response}")
         required_fields = ['student_name', 'user_level', 'user_subjects']
         missing_fields = [field for field in required_fields if field not in st.session_state.responses or not st.session_state.responses[field]]
         if missing_fields:
@@ -894,7 +1004,9 @@ def handle_input_submission(step, response_text):
         else:
             st.session_state.messages.append(("<div class='bot-message'>Aucune matière sélectionnée pour des cours en groupe. Voulez-vous traiter un autre cas ? (Oui/Non)</div>", True))
             st.session_state.step = 15
+
     elif llm_response["step"] == 6 and "forfait_selections" in llm_response["data"]:
+        logger.debug(f"LLM response à l'étape 6  : {llm_response}")
         st.session_state.selected_forfaits = llm_response["data"]["forfait_selections"]
         # Validation que selected_forfaits est un dictionnaire
         if not isinstance(st.session_state.selected_forfaits, dict):
@@ -928,7 +1040,9 @@ def handle_input_submission(step, response_text):
         else:
             st.session_state.messages.append(("<div class='bot-message'>Aucun type de durée disponible. Voulez-vous traiter un autre cas ? (Oui/Non)</div>", True))
             st.session_state.step = 15
+
     elif llm_response["step"] == 7 and "type_duree_selections" in llm_response["data"]:
+        logger.debug(f"Traitement de l'étape 7 avec course_choices : {llm_response}")
         st.session_state.selected_types_duree = llm_response["data"]["type_duree_selections"]
 
     # centre et  générations des groupes
@@ -1422,6 +1536,7 @@ questions = [
 
 placeholders = [
     "Ex: Ahmed larache",
+    "Ex: Oui ou Non",
     f"Ex: {', '.join(levels_list[:3]) if levels_list else 'BL - 2bac sc PC'}",
     f"Ex: {', '.join(subjects_list[:3]) if subjects_list else 'Français, Mathématiques'}",
     "Ex: 12, 15 (ou laissez vide)",
@@ -1449,7 +1564,7 @@ if st.session_state.step == 0:
 
     # Modification de la logique pour afficher ou non le champ de saisie
 # Modification du bloc principal pour gérer les cas où expect_input est False
-elif st.session_state.step in range(1, 16):
+elif st.session_state.step in range(1, 17):
     if st.session_state.expect_input:  # Afficher le champ de saisie seulement si expect_input est True
         input_key = f"input_step_{st.session_state.step}_{st.session_state.input_counter}"
         response = st.text_input("Votre réponse :", key=input_key, placeholder=placeholders[st.session_state.step - 1])
