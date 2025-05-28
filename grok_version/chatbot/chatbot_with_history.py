@@ -1197,13 +1197,13 @@ def handle_input_submission(step, response_text):
     elif llm_response["step"] == 13:
         #st.session_state.messages.append((f"<div class='user-message'>{response_text}</div>", False))
         st.session_state.responses['commentaires'] = response_text.strip()
-
+        reduction_percentage = None
         reduction_keywords = ['réduction', 'reduction', 'remise', 'rabais', 'discount']
         response_lower = response_text.strip().lower()
         reduction_detected = any(keyword in response_lower for keyword in reduction_keywords)
 
         if reduction_detected:
-            st.session_state.messages.append(("<div class='bot-message'>Quel est le pourcentage de réduction que vous souhaitez appliquer ? (Entre 0 et 100)</div>", True))
+            #st.session_state.messages.append(("<div class='bot-message'>Quel est le pourcentage de réduction que vous souhaitez appliquer ? (Entre 0 et 100)</div>", True))
             st.session_state.step = 14
         else:
 
@@ -1440,7 +1440,6 @@ with st.sidebar:
         st.session_state.clear()
         st.session_state.conversation_history = conversation_history
         initialize_session_state()
-        save_conversation()
         logger.debug("Conversation réinitialisée")
         st.rerun()
     

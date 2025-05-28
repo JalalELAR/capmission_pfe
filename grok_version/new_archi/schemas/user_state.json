@@ -1,0 +1,13 @@
+{
+  "user_id": "",
+  "nom": "",
+  "niveau": "",
+  "ecole": "",
+  "matières": [],
+  "choix_cours": "",
+  "disponibilités": [],
+  "groupe_pref": {
+    "type": "",
+    "creneaux_dispos": []
+  }
+}

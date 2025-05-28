@@ -1,0 +1,131 @@
+/* chatbot_project/frontend/style.css */
+@import url('https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css');
+
+div[data-testid="stMainBlockContainer"] { padding-top: 50px; }
+.stMainBlockContainer { padding: 25px; }
+.stApp { background-color: #FFFFFF; }
+
+/*input box*/
+div[data-testid="stBottomBlockContainer"] {
+    padding: 20px;
+    max-width: 95%;
+}
+
+div[data-testid="stBottom"] > div {
+    background: none;
+}
+
+/* Messages container */
+.messages-container {
+    max-height: 70vh;
+    overflow-y: auto;
+    padding-bottom: 80px;
+    margin-bottom: -70px;
+}
+
+/* Scrollbar styling */
+.messages-container::-webkit-scrollbar {
+    width: 8px;
+}
+.messages-container::-webkit-scrollbar-track {
+    background: #f1f1f1;
+}
+.messages-container::-webkit-scrollbar-thumb {
+    background: #888;
+    border-radius: 4px;
+}
+.messages-container::-webkit-scrollbar-thumb:hover {
+    background: #555;
+}
+
+/* Message styling with fade-in animation */
+.bot-message {
+    background-color: #dfdfdf; 
+    border-radius: 10px; 
+    padding: 10px; 
+    margin: 10px 0; 
+    width: fit-content;
+    max-width: 85%; 
+    float: left; 
+    color: #181C14; 
+    font-family: Arial, sans-serif; 
+    position: relative; 
+    opacity: 0;
+    animation: fadeIn 0.7s ease-in forwards;
+}
+.user-message { 
+    background-color: #DC5F00; 
+    border-radius: 10px; 
+    padding: 10px; 
+    margin: 10px 0; 
+    width: fit-content; 
+    max-width: 85%;
+    float: right; 
+    color: #FFFFFF; 
+    font-family: Arial, sans-serif; 
+    text-align: left; 
+    position: relative; 
+    opacity: 0;
+    animation: fadeIn 0.2s ease-in forwards;
+}
+
+@keyframes fadeIn {
+    from {
+        opacity: 0;
+        transform: translateY(10px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+.fade-out {
+    animation: fadeOut 0.5s ease-out forwards;
+}
+
+@keyframes fadeOut {
+    from {
+        opacity: 1;
+        transform: translateY(0);
+    }
+    to {
+        opacity: 0;
+        transform: translateY(10px);
+    }
+}
+
+.container { 
+    overflow: hidden; 
+}
+
+div[data-testid="stTextInput"] {
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    background-color: #FFFFFF;
+    padding: 10px 25px;
+    z-index: 1000; 
+    margin: 0 !important;
+}
+div[data-testid="stTextInput"] input {
+    background-color: #e5e5e5;
+    color: black;
+    width: 100%;
+    border-radius: 5px;
+    padding: 10px;
+}
+div[data-testid="stTextInput"] input::placeholder { 
+    color: black; 
+}
+
+h4 { color: #00796b; margin-bottom: 5px; }
+b { color: #004d40; }
+.profile-name { 
+    text-align: center; 
+    font-size: 25px; 
+    color: white; 
+    margin-top: 10px; 
+    margin-left: 5px; 
+}

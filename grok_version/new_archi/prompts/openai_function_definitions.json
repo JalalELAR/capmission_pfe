@@ -1,0 +1,182 @@
+[
+  {
+    "name": "validate_group_structure",
+    "description": "Valide qu'un groupe respecte la structure attendue.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "group": {
+          "type": "object",
+          "description": "Objet représentant un groupe scolaire à valider."
+        }
+      },
+      "required": [
+        "group"
+      ]
+    }
+  },
+  {
+    "name": "match_value",
+    "description": "Trouve la meilleure correspondance dans une liste de valeurs valides.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "user_input": {
+          "type": "string"
+        },
+        "valid_values": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "required": [
+        "user_input",
+        "valid_values"
+      ]
+    }
+  },
+  {
+    "name": "get_available_forfaits",
+    "description": "Récupère les forfaits disponibles selon le niveau et la matière.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "level": {
+          "type": "string"
+        },
+        "subject": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "level",
+        "subject"
+      ]
+    }
+  },
+  {
+    "name": "get_types_duree_forfait",
+    "description": "Récupère les types de durée disponibles pour un forfait donné.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "id_forfait": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id_forfait"
+      ]
+    }
+  },
+  {
+    "name": "check_overlaps",
+    "description": "Vérifie s’il y a des chevauchements horaires entre les groupes sélectionnés.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "selected_groups": {
+          "type": "object",
+          "description": "Dictionnaire des groupes sélectionnés par matière."
+        }
+      },
+      "required": [
+        "selected_groups"
+      ]
+    }
+  },
+  {
+    "name": "calculate_tariffs",
+    "description": "Calcule les tarifs totaux pour les groupes sélectionnés.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "selected_groups": {
+          "type": "object"
+        },
+        "user_duree_types": {
+          "type": "object"
+        },
+        "user_type_duree_ids": {
+          "type": "object"
+        },
+        "forfaits_info": {
+          "type": "object"
+        }
+      },
+      "required": [
+        "selected_groups",
+        "user_duree_types",
+        "user_type_duree_ids",
+        "forfaits_info"
+      ]
+    }
+  },
+  {
+    "name": "get_remaining_sessions",
+    "description": "Retourne le nombre de séances restantes pour un cours donné.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "id_cours": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id_cours"
+      ]
+    }
+  },
+  {
+    "name": "get_recommendations",
+    "description": "Génère les recommandations de groupes pour un utilisateur selon ses besoins.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "student_name": {
+          "type": "string"
+        },
+        "user_level": {
+          "type": "string"
+        },
+        "user_subjects": {
+          "type": "string"
+        },
+        "user_teachers": {
+          "type": [
+            "string",
+            "array"
+          ]
+        },
+        "user_school": {
+          "type": "string"
+        },
+        "user_center": {
+          "type": "string"
+        },
+        "selected_forfaits": {
+          "type": "object"
+        },
+        "selected_types_duree": {
+          "type": "object"
+        },
+        "forfaits_info": {
+          "type": "object"
+        }
+      },
+      "required": [
+        "student_name",
+        "user_level",
+        "user_subjects",
+        "user_teachers",
+        "user_school",
+        "user_center",
+        "selected_forfaits",
+        "selected_types_duree",
+        "forfaits_info"
+      ]
+    }
+  }
+]
